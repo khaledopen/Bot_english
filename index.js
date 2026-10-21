@@ -35,6 +35,8 @@ if (!GROQ_KEY) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
+const FOOTER_SIGNATURE = "\n\n_byBEn10_";
+
 // Commande /start
 bot.start(async (ctx) => {
   const session = getUserSession(ctx.from.id);
@@ -49,7 +51,7 @@ Salut ${ctx.from.first_name || 'ami'} ! Je suis ton compagnon quotidien pour t'a
 
 Niveau actuel : *${session.level.toUpperCase()}*
 
-Choisis ton niveau ou commence dès maintenant en m'envoyant un message (texte ou vocal) !`;
+Choisis ton niveau ou commence dès maintenant en m'envoyant un message (texte ou vocal) !${FOOTER_SIGNATURE}`;
 
   const keyboard = Markup.inlineKeyboard([
     [Markup.button.callback('🟢 Débutant (Beginner)', 'lvl_beginner')],
@@ -112,7 +114,7 @@ bot.help(async (ctx) => {
 
 💡 *Astuce* : Pas besoin d'être parfait ! L'important est de pratiquer un peu chaque jour.`;
 
-  await ctx.replyWithMarkdown(helpText);
+  await ctx.replyWithMarkdown(helpText + FOOTER_SIGNATURE);
 });
 
 // Gestion des messages vocaux (Voice notes)
@@ -139,7 +141,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
     const userTranscript = await transcribeAudio(audioBuffer);
 
     if (!userTranscript || !userTranscript.trim()) {
-      await ctx.reply("🤔 Je n'ai pas bien entendu ton enregistrement. Peux-tu réessayer en parlant plus près du micro ?");
+      await ctx.reply("🤔 Je n'ai pas bien entendu ton enregistrement. Peux-tu réessayer en parlant plus près du micro ?" + FOOTER_SIGNATURE, { parse_mode: 'Markdown' });
       return;
     }
 
@@ -159,12 +161,12 @@ bot.on(['voice', 'audio'], async (ctx) => {
       await ctx.replyWithVoice({ source: voiceBuffer, filename: 'response.mp3' });
     }
 
-    // 4. Envoyer les corrections et la réponse textuelle
-    await ctx.reply(tutorResponse.fullText);
+    // 4. Envoyer les corrections et la réponse textuelle signée
+    await ctx.reply(tutorResponse.fullText + "\n\nbyBEn10");
 
   } catch (error) {
     console.error('Erreur traitement vocal:', error);
-    await ctx.reply(`⚠️ Oups, une erreur est survenue lors de l'analyse vocale : ${error.message}`);
+    await ctx.reply(`⚠️ Oups, une erreur est survenue lors de l'analyse vocale : ${error.message}\n\nbyBEn10`);
   }
 });
 
@@ -177,8 +179,8 @@ bot.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
     const tutorResponse = await getTutorResponse(ctx.from.id, userText);
 
-    // Envoyer d'abord la réponse texte
-    await ctx.reply(tutorResponse.fullText);
+    // Envoyer d'abord la réponse texte signée
+    await ctx.reply(tutorResponse.fullText + "\n\nbyBEn10");
 
     // Générer également le message vocal pour l'écoute
     await ctx.sendChatAction('record_voice');
@@ -189,7 +191,7 @@ bot.on('text', async (ctx) => {
 
   } catch (error) {
     console.error('Erreur traitement texte:', error);
-    await ctx.reply(`⚠️ Oups, une erreur est survenue : ${error.message}`);
+    await ctx.reply(`⚠️ Oups, une erreur est survenue : ${error.message}\n\nbyBEn10`);
   }
 });
 
