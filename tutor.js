@@ -62,8 +62,23 @@ async function transcribeAudio(audioBuffer) {
   }
 }
 
+function formatTutorReply(rawText) {
+  if (!rawText) return '';
+  return rawText
+    // Supprimer les délimiteurs markdown bruts type --- ou ===
+    .replace(/^---+$/gm, '')
+    .replace(/^===+$/gm, '')
+    // Assurer un saut de ligne propre avant les sections principales
+    .replace(/([^\n])\n(💡\s*Corrections)/gi, '$1\n\n$2')
+    .replace(/([^\n])\n(💬\s*Nova)/gi, '$1\n\n$2')
+    .replace(/([^\n])\n(❓)/gi, '$1\n\n$2')
+    // Éviter plus de 2 sauts de ligne successifs
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 /**
- * Génère la réponse du tuteur d'anglais avec Groq LLaMA 3.3 70B
+ * Génère la réponse du tuteur d'anglais avec Groq
  */
 async function getTutorResponse(userId, userMessage) {
   const session = getUserSession(userId);
@@ -75,22 +90,24 @@ Ton objectif : Aider l'utilisateur à pratiquer l'anglais quotidiennement avec c
 
 ${levelInstruction}
 
-RÈGLES D'OR DE RÉPONSE :
-1. Si l'utilisateur fait des erreurs en anglais (grammaire, orthographe, tournures bizarres) :
-   - Ajoute une section "💡 Corrections :" courte et encourageante (en français si niveau débutant/intermédiaire) en montrant la bonne formulation.
-   - Si la phrase de l'utilisateur était parfaite, félicite-le brièvement !
-2. Dans la section "💬 English :", réponds à ce qu'il a dit en anglais de façon naturelle, vivante et intéressante.
-3. Termine TOUJOURS par une question ouverte ou une relance en anglais pour que l'utilisateur continue de converser.
-4. Si l'utilisateur parle en français pour poser une question sur l'anglais, réponds à sa question puis réenchaîne en anglais.
+DIRECTIVES DE MISE EN PAGE ET DE LISIBILITÉ :
+⚠️ RÈGLE ABSOLUE : NE FAIS JAMAIS DE GROS BLOCS COMPACTS DE TEXTE.
+Sur Telegram mobile, l'utilisateur doit pouvoir lire très facilement. Ta réponse DOIT être très aérée, découpée en plusieurs petits paragraphes courts (1 à 3 phrases maximum) séparés par un saut de ligne vide.
 
-Format de réponse attendu :
----
+STRUCTURE EXACTE À RESPECTER :
+
 💡 Corrections & Conseils :
-[Tes corrections bienveillantes ou félicitations]
+• Si l'utilisateur a fait des fautes :
+  - ❌ "erreur" → ✅ "correction"
+  - Explication courte et claire en français avec des puces et des sauts de ligne.
+• Si la phrase de l'utilisateur est parfaite : félicite-le chaleureusement en 1 courte phrase.
 
 💬 Nova :
-[Ta réponse en anglais + question pour continuer]
----`;
+[Premier paragraphe court en anglais (1 à 2 phrases pour rebondir naturellement)]
+
+[Deuxième paragraphe court en anglais pour développer ou donner un détail intéressant (1 à 2 phrases)]
+
+❓ [Question finale de relance en anglais, isolée sur sa propre ligne pour continuer la discussion]`;
 
   // Ajoute le message à l'historique
   session.history.push({ role: 'user', content: userMessage });
@@ -111,12 +128,13 @@ Format de réponse attendu :
     temperature: 0.7,
   });
 
-  const replyText = completion.choices[0].message.content;
+  const rawReplyText = completion.choices[0].message.content;
+  const replyText = formatTutorReply(rawReplyText);
   session.history.push({ role: 'assistant', content: replyText });
 
   // Extraire la partie anglaise pour la synthèse vocale
   let spokenEnglish = replyText;
-  const match = replyText.match(/💬\s*(?:Nova\s*)?:([\s\S]*)/i);
+  const match = replyText.match(/💬\s*(?:Nova)?\s*[:\n\-–]?\s*([\s\S]*)/i);
   if (match && match[1]) {
     spokenEnglish = match[1].trim();
   }
@@ -128,28 +146,40 @@ Format de réponse attendu :
 }
 
 /**
- * Génère la note vocale (TTS audio MP3) 100% gratuite pour la réponse en anglais
+ * Génère la note vocale (TTS audio MP3) 100% gratuite pour la réponse en anglais.
+ * Parle plus posément et lentement (slow: true) pour que l'utilisateur comprenne distinctement chaque mot.
  */
 async function generateSpeech(textToSpeak) {
   try {
     const cleanText = textToSpeak
-      .replace(/[*_#`\-]/g, '')
-      .replace(/\n+/g, ' ')
+      .replace(/[*_#`~>]/g, '')
+      .replace(/[❓💡❌✅💬•]/gu, '')
+      .replace(/\s+/g, ' ')
       .trim();
 
     if (!cleanText) return null;
 
-    // Découper si le texte est très long pour l'API TTS
-    const shortText = cleanText.length > 200 ? cleanText.substring(0, 200) : cleanText;
+    // Découper proprement jusqu'à 350 caractères pour une note vocale claire, concise et pédagogique
+    const maxChars = 350;
+    let targetText = cleanText;
+    if (targetText.length > maxChars) {
+      const lastSentenceIndex = targetText.lastIndexOf('.', maxChars);
+      if (lastSentenceIndex > 100) {
+        targetText = targetText.substring(0, lastSentenceIndex + 1);
+      } else {
+        targetText = targetText.substring(0, maxChars);
+      }
+    }
 
-    const base64Audio = await googleTTS.getAudioBase64(shortText, {
+    const audioList = await googleTTS.getAllAudioBase64(targetText, {
       lang: 'en',
-      slow: false,
+      slow: true, // Parle plus lentement pour une écoute et prononciation optimales
       host: 'https://translate.google.com',
       timeout: 10000,
     });
 
-    return Buffer.from(base64Audio, 'base64');
+    const audioBuffers = audioList.map(item => Buffer.from(item.base64, 'base64'));
+    return Buffer.concat(audioBuffers);
   } catch (error) {
     console.error('Erreur génération TTS:', error);
     return null;
