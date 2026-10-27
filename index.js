@@ -10,9 +10,44 @@ const {
   generateSpeech
 } = require('./tutor');
 
-// Serveur HTTP léger indispensable pour Render Free Web Service
+const BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
+const GROQ_KEY = (process.env.GROQ_API_KEY || '').trim();
+
+if (!BOT_TOKEN) {
+  console.error("❌ ERREUR : La variable TELEGRAM_BOT_TOKEN est manquante !");
+  console.error("Veuillez renseigner votre token Telegram.");
+  process.exit(1);
+}
+
+if (!GROQ_KEY) {
+  console.warn("⚠️ ATTENTION : La variable GROQ_API_KEY est manquante.");
+  console.warn("Ajoute ta clé Groq gratuite (commence par gsk_...) depuis https://console.groq.com");
+}
+
+const bot = new Telegraf(BOT_TOKEN);
+
+// Serveur HTTP léger indispensable pour Render Free Web Service + diagnostic /status
 const PORT = process.env.PORT || 3000;
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
+  if (req.url === '/status' || req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    try {
+      const me = await bot.telegram.getMe();
+      return res.end(JSON.stringify({
+        status: 'online',
+        bot: `@${me.username}`,
+        uptimeSeconds: Math.floor(process.uptime()),
+        timestamp: new Date().toISOString()
+      }, null, 2));
+    } catch (err) {
+      return res.end(JSON.stringify({
+        status: 'error',
+        error: err.message,
+        uptimeSeconds: Math.floor(process.uptime())
+      }, null, 2));
+    }
+  }
+
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end('English Coach Telegram Bot is alive and running! 🚀\n');
 });
@@ -26,22 +61,6 @@ server.listen(PORT, () => {
     console.error('Erreur serveur HTTP:', err);
   }
 });
-
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const GROQ_KEY = process.env.GROQ_API_KEY;
-
-if (!BOT_TOKEN) {
-  console.error("❌ ERREUR : La variable TELEGRAM_BOT_TOKEN est manquante dans le fichier .env !");
-  console.error("Veuillez renseigner votre token Telegram dans .env");
-  process.exit(1);
-}
-
-if (!GROQ_KEY) {
-  console.warn("⚠️ ATTENTION : La variable GROQ_API_KEY est manquante dans .env.");
-  console.warn("Ajoute ta clé Groq gratuite (commence par gsk_...) depuis https://console.groq.com");
-}
-
-const bot = new Telegraf(BOT_TOKEN);
 
 const FOOTER_SIGNATURE = "\n\n_byBEn10_";
 
