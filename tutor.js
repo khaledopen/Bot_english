@@ -1,3 +1,4 @@
+require('dotenv').config();
 const Groq = require('groq-sdk');
 const { toFile } = require('groq-sdk');
 const googleTTS = require('google-tts-api');

@@ -12,11 +12,19 @@ const {
 
 // Serveur HTTP léger indispensable pour Render Free Web Service
 const PORT = process.env.PORT || 3000;
-http.createServer((req, res) => {
+const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end('English Coach Telegram Bot is alive and running! 🚀\n');
-}).listen(PORT, () => {
+});
+
+server.listen(PORT, () => {
   console.log(`🌐 Serveur HTTP actif sur le port ${PORT} (compatible Render)`);
+}).on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.warn(`⚠️ Le port ${PORT} est déjà occupé, mais le bot Telegram continue en mode polling.`);
+  } else {
+    console.error('Erreur serveur HTTP:', err);
+  }
 });
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -39,6 +47,7 @@ const FOOTER_SIGNATURE = "\n\n_byBEn10_";
 
 // Commande /start
 bot.start(async (ctx) => {
+  console.log(`👋 [${new Date().toLocaleTimeString()}] /start reçu de ${ctx.from.first_name || 'Utilisateur'}`);
   const session = getUserSession(ctx.from.id);
   const welcomeText = `🇬🇧 *Welcome to your English Coach Bot!*
 
@@ -119,6 +128,9 @@ bot.help(async (ctx) => {
 
 // Gestion des messages vocaux (Voice notes)
 bot.on(['voice', 'audio'], async (ctx) => {
+  const senderName = ctx.from.first_name || 'Utilisateur';
+  console.log(`🎙️ [${new Date().toLocaleTimeString()}] Note vocale reçue de ${senderName}`);
+
   try {
     await ctx.sendChatAction('record_voice');
 
@@ -175,18 +187,23 @@ bot.on('text', async (ctx) => {
   const userText = ctx.message.text.trim();
   if (userText.startsWith('/')) return; // Ignore les commandes non traitées
 
+  const senderName = ctx.from.first_name || 'Utilisateur';
+  console.log(`📩 [${new Date().toLocaleTimeString()}] Message reçu de ${senderName} : "${userText}"`);
+
   try {
     await ctx.sendChatAction('typing');
     const tutorResponse = await getTutorResponse(ctx.from.id, userText);
 
     // Envoyer d'abord la réponse texte signée
     await ctx.reply(tutorResponse.fullText + "\n\nbyBEn10");
+    console.log(`💬 Réponse texte envoyée à ${senderName}`);
 
     // Générer également le message vocal pour l'écoute
     await ctx.sendChatAction('record_voice');
     const voiceBuffer = await generateSpeech(tutorResponse.spokenEnglish);
     if (voiceBuffer) {
       await ctx.replyWithVoice({ source: voiceBuffer, filename: 'english.mp3' }, { caption: '🎧 Écoute la prononciation anglaise :' });
+      console.log(`🎙️ Note vocale envoyée à ${senderName}`);
     }
 
   } catch (error) {
@@ -196,14 +213,13 @@ bot.on('text', async (ctx) => {
 });
 
 // Lancement du bot
-bot.launch()
-  .then(() => {
-    console.log('🚀 Le bot Telegram d\'anglais (Groq) est démarré avec succès !');
-    console.log('Tu peux maintenant lui parler sur Telegram.');
-  })
-  .catch((err) => {
-    console.error('Erreur au lancement du bot:', err);
-  });
+bot.launch(() => {
+  console.log('🚀 Le bot Telegram d\'anglais (Groq) est démarré avec succès !');
+  console.log(`🤖 Connecté en tant que @${bot.botInfo?.username || 'EnglishMate_KB_bot'}`);
+  console.log('👉 Tu peux lui envoyer un message sur Telegram dès maintenant.');
+}).catch((err) => {
+  console.error('❌ Erreur au lancement du bot:', err);
+});
 
 // Arrêt propre en cas de signal système
 process.once('SIGINT', () => bot.stop('SIGINT'));
