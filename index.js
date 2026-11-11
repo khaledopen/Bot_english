@@ -1,4 +1,5 @@
 require('dotenv').config();
+const crypto = require('crypto');
 const http = require('http');
 const { Telegraf, Markup } = require('telegraf');
 const {
@@ -26,37 +27,151 @@ if (!GROQ_KEY) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
-// Serveur HTTP léger indispensable pour Render Free Web Service + diagnostic /status
+// Détection automatique de l'URL publique (Render fournit RENDER_EXTERNAL_URL automatiquement)
+const PUBLIC_URL = (process.env.WEBHOOK_URL || process.env.RENDER_EXTERNAL_URL || '')
+  .trim()
+  .replace(/\/+$/, '');
+const IS_WEBHOOK_MODE = /^https:\/\//i.test(PUBLIC_URL);
+const WEBHOOK_PATH = `/telegraf/${bot.secretPathComponent()}`;
+const WEBHOOK_SECRET = (
+  process.env.WEBHOOK_SECRET ||
+  crypto.createHash('sha256').update(BOT_TOKEN).digest('hex')
+).trim();
+
+// Déduplication des mises à jour Telegram (évite les doublons si Telegram réessaie pendant un réveil Render)
+const MAX_PROCESSED_UPDATES = 500;
+const processedUpdates = new Set();
+
+function isDuplicateUpdate(updateId) {
+  if (typeof updateId !== 'number') return false;
+  if (processedUpdates.has(updateId)) return true;
+  processedUpdates.add(updateId);
+  if (processedUpdates.size > MAX_PROCESSED_UPDATES) {
+    const oldestId = processedUpdates.values().next().value;
+    processedUpdates.delete(oldestId);
+  }
+  return false;
+}
+
+function sendResponse(res, method, statusCode, contentType, body) {
+  res.writeHead(statusCode, { 'Content-Type': contentType });
+  if (method === 'HEAD') {
+    return res.end();
+  }
+  return res.end(body);
+}
+
+function readJsonBody(req, maxBytes = 2 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        reject(new Error('Payload trop volumineux'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      try {
+        const raw = Buffer.concat(chunks).toString('utf8');
+        resolve(JSON.parse(raw));
+      } catch (err) {
+        reject(err);
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+// Serveur HTTP léger : Webhook Telegram + routes /ping, /health, /status (compatible GET & HEAD)
 const PORT = process.env.PORT || 3000;
 const server = http.createServer(async (req, res) => {
-  if (req.url === '/status' || req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
+  const pathname = (req.url || '/').split('?')[0];
+
+  // Point de terminaison Webhook Telegram
+  if (IS_WEBHOOK_MODE && req.method === 'POST' && pathname === WEBHOOK_PATH) {
+    if (req.headers['x-telegram-bot-api-secret-token'] !== WEBHOOK_SECRET) {
+      return sendResponse(res, req.method, 403, 'text/plain; charset=utf-8', 'Forbidden');
+    }
+
+    let update;
+    try {
+      update = await readJsonBody(req);
+    } catch (err) {
+      console.error('❌ Erreur lecture payload webhook:', err.message);
+      return sendResponse(res, req.method, 400, 'text/plain; charset=utf-8', 'Invalid JSON');
+    }
+
+    // Accuser réception immédiatement pour éviter tout timeout Telegram pendant le traitement IA/audio
+    sendResponse(res, req.method, 200, 'application/json', '{"ok":true}');
+
+    if (!isDuplicateUpdate(update?.update_id)) {
+      bot.handleUpdate(update).catch((err) => {
+        console.error('❌ Erreur traitement update webhook:', err);
+      });
+    }
+    return;
+  }
+
+  // Routes ultra-légères pour UptimeRobot / cron-job.org (sans appel externe Telegram)
+  if (pathname === '/ping' || pathname === '/health' || pathname === '/healthz') {
+    const payload = JSON.stringify({
+      status: 'ok',
+      mode: IS_WEBHOOK_MODE ? 'webhook' : 'polling',
+      uptimeSeconds: Math.floor(process.uptime()),
+      timestamp: new Date().toISOString()
+    }, null, 2);
+    return sendResponse(res, req.method, 200, 'application/json', payload);
+  }
+
+  // Route de diagnostic complet (vérifie la connexion Telegram)
+  if (pathname === '/status') {
+    if (req.method === 'HEAD') {
+      return sendResponse(res, req.method, 200, 'application/json', '');
+    }
     try {
       const me = await bot.telegram.getMe();
-      return res.end(JSON.stringify({
+      const webhookInfo = IS_WEBHOOK_MODE ? await bot.telegram.getWebhookInfo() : null;
+      return sendResponse(res, req.method, 200, 'application/json', JSON.stringify({
         status: 'online',
+        mode: IS_WEBHOOK_MODE ? 'webhook' : 'polling',
         bot: `@${me.username}`,
+        webhookActive: webhookInfo ? Boolean(webhookInfo.url) : false,
+        pendingUpdateCount: webhookInfo ? webhookInfo.pending_update_count : undefined,
         uptimeSeconds: Math.floor(process.uptime()),
         timestamp: new Date().toISOString()
       }, null, 2));
     } catch (err) {
-      return res.end(JSON.stringify({
+      return sendResponse(res, req.method, 200, 'application/json', JSON.stringify({
         status: 'error',
+        mode: IS_WEBHOOK_MODE ? 'webhook' : 'polling',
         error: err.message,
         uptimeSeconds: Math.floor(process.uptime())
       }, null, 2));
     }
   }
 
-  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-  res.end('English Coach Telegram Bot is alive and running! 🚀\n');
+  return sendResponse(
+    res,
+    req.method,
+    200,
+    'text/plain; charset=utf-8',
+    'English Coach Telegram Bot is alive and running! 🚀\n'
+  );
 });
 
 server.listen(PORT, () => {
   console.log(`🌐 Serveur HTTP actif sur le port ${PORT} (compatible Render)`);
 }).on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.warn(`⚠️ Le port ${PORT} est déjà occupé, mais le bot Telegram continue en mode polling.`);
+    if (IS_WEBHOOK_MODE) {
+      console.error(`❌ Le port ${PORT} est déjà occupé (indispensable en mode webhook).`);
+    } else {
+      console.warn(`⚠️ Le port ${PORT} est déjà occupé, mais le bot Telegram continue en mode polling.`);
+    }
   } else {
     console.error('Erreur serveur HTTP:', err);
   }
@@ -231,15 +346,86 @@ bot.on('text', async (ctx) => {
   }
 });
 
-// Lancement du bot
-bot.launch(() => {
-  console.log('🚀 Le bot Telegram d\'anglais (Groq) est démarré avec succès !');
-  console.log(`🤖 Connecté en tant que @${bot.botInfo?.username || 'EnglishMate_KB_bot'}`);
-  console.log('👉 Tu peux lui envoyer un message sur Telegram dès maintenant.');
-}).catch((err) => {
+// Gestion globale des erreurs Telegraf pour éviter un arrêt silencieux du processus
+bot.catch((err, ctx) => {
+  console.error(`❌ Erreur Telegraf (${ctx?.updateType || 'unknown'}):`, err);
+});
+
+let keepAliveTimer = null;
+
+function startSelfKeepAlive() {
+  if (!IS_WEBHOOK_MODE || process.env.DISABLE_SELF_PING === 'true') return;
+  const intervalMs = 10 * 60 * 1000; // 10 minutes (< seuil 15 min de Render)
+  keepAliveTimer = setInterval(async () => {
+    try {
+      const res = await fetch(`${PUBLIC_URL}/ping`, { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) {
+        console.warn(`⚠️ Keep-alive /ping a répondu HTTP ${res.status}`);
+      }
+    } catch (err) {
+      console.warn('⚠️ Échec keep-alive /ping:', err.message);
+    }
+  }, intervalMs);
+  keepAliveTimer.unref();
+  console.log('💓 Auto-ping keep-alive activé toutes les 10 minutes sur /ping');
+}
+
+let isShuttingDown = false;
+
+async function startBot() {
+  if (IS_WEBHOOK_MODE) {
+    const webhookUrl = `${PUBLIC_URL}${WEBHOOK_PATH}`;
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        bot.botInfo = await bot.telegram.getMe();
+        await bot.telegram.setWebhook(webhookUrl, {
+          secret_token: WEBHOOK_SECRET,
+          drop_pending_updates: false
+        });
+        console.log('🚀 Le bot Telegram d\'anglais (Groq) est démarré en mode WEBHOOK !');
+        console.log(`🤖 Connecté en tant que @${bot.botInfo.username}`);
+        console.log(`🔗 Webhook configuré sur ${PUBLIC_URL}/telegraf/***`);
+        startSelfKeepAlive();
+        return;
+      } catch (err) {
+        if (attempt === maxAttempts || isShuttingDown) {
+          throw err;
+        }
+        console.warn(`⚠️ Tentative ${attempt}/${maxAttempts} setWebhook échouée (${err.message}), nouvelle tentative dans 5s...`);
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      }
+    }
+    return;
+  }
+
+  await bot.launch(() => {
+    console.log('🚀 Le bot Telegram d\'anglais (Groq) est démarré en mode POLLING (local) !');
+    console.log(`🤖 Connecté en tant que @${bot.botInfo?.username || 'EnglishMate_KB_bot'}`);
+    console.log('👉 Tu peux lui envoyer un message sur Telegram dès maintenant.');
+  });
+}
+
+startBot().catch((err) => {
   console.error('❌ Erreur au lancement du bot:', err);
 });
 
 // Arrêt propre en cas de signal système
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+function shutdown(signal) {
+  isShuttingDown = true;
+  if (keepAliveTimer) {
+    clearInterval(keepAliveTimer);
+    keepAliveTimer = null;
+  }
+  server.close();
+  if (!IS_WEBHOOK_MODE) {
+    try {
+      bot.stop(signal);
+    } catch {
+      // Ignore si le polling n'était pas démarré
+    }
+  }
+}
+
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));
