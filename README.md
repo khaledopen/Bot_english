@@ -67,3 +67,10 @@ Le bot est en ligne et prêt à discuter !
 4. Envoie /admin_stats au bot en message direct depuis le compte administrateur. Le canal reçoit une notification par nouvel utilisateur suivi, avec son nom Telegram, son identifiant et le total. Les textes, vocaux et transcriptions restent en dehors du canal.
 
 Le compteur démarre avec les interactions observées après activation. Un utilisateur existant est compté quand il interagit à nouveau.
+
+## Espace Web EnglishMate
+
+- Utilise Node.js 24 ou supérieur pour Argon2id.
+- Sur Render, conserve ADMIN_DATABASE_URL pour Supabase ou configure WEB_DATABASE_URL pour une base Web distincte. Le bot crée les tables dans le schéma privé englishmate_web. Le rôle PostgreSQL doit pouvoir créer ce schéma et ses tables. Les projets Supabase utilisent le Session pooler et le certificat intégré au bot.
+- Sur Vercel, le fichier vercel.json redirige /api/account vers Render. Les cookies de session restent sur le domaine du site. Déploie la version API et la version Vercel ensemble, car la nouvelle API remplace l’ancien parcours anonyme.
+- Pour un serveur API de développement sur HTTP local, utilise WEB_LOCAL_HTTP=true et WEB_API_TARGET sur le serveur Vite. Utilise une base de développement et évite de démarrer une seconde instance avec le token de production Telegram.

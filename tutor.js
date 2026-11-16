@@ -25,6 +25,14 @@ const LEVEL_PROMPTS = {
 - Explications concises, majoritairement en anglais si pertinent.`
 };
 
+const WEB_GOALS = {
+  speaking: "Privilégie des formulations faciles à dire et des questions pour pratiquer l’oral.",
+  everyday: "Privilégie les situations et le vocabulaire de la vie quotidienne.",
+  professional: "Propose des formulations adaptées au travail quand le sujet s’y prête.",
+  interviews: "Aide à formuler des réponses et des exemples utiles en entretien quand le sujet s’y prête.",
+  grammar: "Accorde une attention particulière à la grammaire et au vocabulaire.",
+};
+
 function getUserSession(userId) {
   if (!userSessions.has(userId)) {
     userSessions.set(userId, {
@@ -93,6 +101,7 @@ async function replyToSession(session, userMessage, platform = 'telegram') {
 Ton objectif : Aider l'utilisateur à pratiquer l'anglais quotidiennement avec confiance.
 
 ${levelInstruction}
+${platform === 'web' ? WEB_GOALS[session.goal] || '' : ''}
 
 DIRECTIVES DE MISE EN PAGE ET DE LISIBILITÉ :
 ⚠️ RÈGLE ABSOLUE : NE FAIS JAMAIS DE GROS BLOCS COMPACTS DE TEXTE.

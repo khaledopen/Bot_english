@@ -3,7 +3,8 @@ const crypto = require('crypto');
 const http = require('http');
 const { Telegraf, Markup } = require('telegraf');
 const tutor = require('./tutor');
-const { createWebPractice } = require('./web-practice.cjs');
+const { createAccountApi } = require('./web-account-api.cjs');
+const { createAccountStore } = require('./web-account-store.cjs');
 const {
   getUserSession,
   setUserLevel,
@@ -91,10 +92,19 @@ function readJsonBody(req, maxBytes = 2 * 1024 * 1024) {
 // Serveur HTTP léger : Webhook Telegram + routes /ping, /health, /status (compatible GET & HEAD)
 const probeAdminDatabase = require('./admin-activity.cjs').installAdminActivity(bot);
 const PORT = process.env.PORT || 3000;
-const webPractice = createWebPractice(tutor, process.env.WEB_ALLOWED_ORIGINS);
+const accountStore = createAccountStore((process.env.WEB_DATABASE_URL || process.env.ADMIN_DATABASE_URL || '').trim());
+const accountApi = createAccountApi(accountStore, tutor, {
+  secure: process.env.RENDER === 'true' || process.env.WEB_LOCAL_HTTP !== 'true',
+});
 const server = http.createServer(async (req, res) => {
   const pathname = (req.url || '/').split('?')[0];
-  if (pathname === '/api/practice') return webPractice(req, res);
+  if (pathname.startsWith('/api/account/')) {
+    const url = new URL(req.url, 'http://localhost');
+    return accountApi(req, res, pathname.slice('/api/account/'.length), url);
+  }
+  if (pathname === '/api/practice') {
+    return sendResponse(res, req.method, 410, 'application/json', JSON.stringify({ error: 'Actualise la page pour accéder au nouvel espace de pratique.' }));
+  }
 
   // Point de terminaison Webhook Telegram
   if (IS_WEBHOOK_MODE && req.method === 'POST' && pathname === WEBHOOK_PATH) {

@@ -79,4 +79,4 @@ function createPostgresActivity(connectionString) {
   };
 }
 
-module.exports = { createPostgresActivity, describeFailure };
+module.exports = { createPostgresActivity, describeFailure, withSupabaseCertificate };
