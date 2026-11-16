@@ -2,6 +2,8 @@ require('dotenv').config();
 const crypto = require('crypto');
 const http = require('http');
 const { Telegraf, Markup } = require('telegraf');
+const tutor = require('./tutor');
+const { createWebPractice } = require('./web-practice.cjs');
 const {
   getUserSession,
   setUserLevel,
@@ -9,7 +11,7 @@ const {
   transcribeAudio,
   getTutorResponse,
   generateSpeech
-} = require('./tutor');
+} = tutor;
 
 const BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
 const GROQ_KEY = (process.env.GROQ_API_KEY || '').trim();
@@ -89,8 +91,10 @@ function readJsonBody(req, maxBytes = 2 * 1024 * 1024) {
 // Serveur HTTP léger : Webhook Telegram + routes /ping, /health, /status (compatible GET & HEAD)
 const probeAdminDatabase = require('./admin-activity.cjs').installAdminActivity(bot);
 const PORT = process.env.PORT || 3000;
+const webPractice = createWebPractice(tutor, process.env.WEB_ALLOWED_ORIGINS);
 const server = http.createServer(async (req, res) => {
   const pathname = (req.url || '/').split('?')[0];
+  if (pathname === '/api/practice') return webPractice(req, res);
 
   // Point de terminaison Webhook Telegram
   if (IS_WEBHOOK_MODE && req.method === 'POST' && pathname === WEBHOOK_PATH) {

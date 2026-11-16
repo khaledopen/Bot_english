@@ -49,9 +49,9 @@ function resetUserHistory(userId) {
 /**
  * Transcrit un message vocal audio (Buffer OGG Telegram) via Groq Whisper (ultra-rapide et gratuit)
  */
-async function transcribeAudio(audioBuffer) {
+async function transcribeAudio(audioBuffer, extension = 'ogg', type = 'audio/ogg') {
   try {
-    const file = await toFile(audioBuffer, 'voice.ogg', { type: 'audio/ogg' });
+    const file = await toFile(audioBuffer, `voice.${extension}`, { type });
     const response = await groq.audio.transcriptions.create({
       file,
       model: 'whisper-large-v3-turbo',
@@ -82,10 +82,13 @@ function formatTutorReply(rawText) {
  * Génère la réponse du tuteur d'anglais avec Groq
  */
 async function getTutorResponse(userId, userMessage) {
-  const session = getUserSession(userId);
+  return replyToSession(getUserSession(userId), userMessage);
+}
+
+async function replyToSession(session, userMessage, platform = 'telegram') {
   const levelInstruction = LEVEL_PROMPTS[session.level] || LEVEL_PROMPTS.intermediate;
 
-  const systemPrompt = `Tu es "Nova", un tuteur et partenaire d'apprentissage d'anglais bienveillant, chaleureux et très pédagogue sur Telegram.
+  const systemPrompt = `Tu es "Nova", un tuteur et partenaire d'apprentissage d'anglais bienveillant, chaleureux et très pédagogue ${platform === 'web' ? 'sur le Web' : 'sur Telegram'}.
 
 Ton objectif : Aider l'utilisateur à pratiquer l'anglais quotidiennement avec confiance.
 
@@ -93,7 +96,7 @@ ${levelInstruction}
 
 DIRECTIVES DE MISE EN PAGE ET DE LISIBILITÉ :
 ⚠️ RÈGLE ABSOLUE : NE FAIS JAMAIS DE GROS BLOCS COMPACTS DE TEXTE.
-Sur Telegram mobile, l'utilisateur doit pouvoir lire très facilement. Ta réponse DOIT être très aérée, découpée en plusieurs petits paragraphes courts (1 à 3 phrases maximum) séparés par un saut de ligne vide.
+Sur mobile, l'utilisateur doit pouvoir lire très facilement. ${platform === 'web' ? 'Explique les corrections en français à chaque niveau et réponds en anglais.' : ''} Ta réponse DOIT être très aérée, découpée en plusieurs petits paragraphes courts (1 à 3 phrases maximum) séparés par un saut de ligne vide.
 
 STRUCTURE EXACTE À RESPECTER :
 
@@ -110,17 +113,11 @@ STRUCTURE EXACTE À RESPECTER :
 
 ❓ [Question finale de relance en anglais, isolée sur sa propre ligne pour continuer la discussion]`;
 
-  // Ajoute le message à l'historique
-  session.history.push({ role: 'user', content: userMessage });
-
-  // On conserve les 20 derniers échanges
-  if (session.history.length > 20) {
-    session.history = session.history.slice(-20);
-  }
-
+  const userTurn = { role: 'user', content: userMessage };
   const messages = [
     { role: 'system', content: systemPrompt },
-    ...session.history
+    ...session.history.slice(-18),
+    userTurn,
   ];
 
   const completion = await groq.chat.completions.create({
@@ -131,6 +128,9 @@ STRUCTURE EXACTE À RESPECTER :
 
   const rawReplyText = completion.choices[0].message.content;
   const replyText = formatTutorReply(rawReplyText);
+  if (!replyText) throw new Error('Empty tutor response');
+  session.history.splice(0, Math.max(0, session.history.length - 18));
+  session.history.push(userTurn);
   session.history.push({ role: 'assistant', content: replyText });
 
   // Extraire la partie anglaise pour la synthèse vocale
@@ -193,5 +193,6 @@ module.exports = {
   resetUserHistory,
   transcribeAudio,
   getTutorResponse,
+  replyToSession,
   generateSpeech
 };
