@@ -179,6 +179,8 @@ server.listen(PORT, () => {
 
 const FOOTER_SIGNATURE = "\n\n_byBEn10_";
 
+require('./admin-activity.cjs').installAdminActivity(bot);
+
 // Commande /start
 bot.start(async (ctx) => {
   console.log(`👋 [${new Date().toLocaleTimeString()}] /start reçu de ${ctx.from.first_name || 'Utilisateur'}`);

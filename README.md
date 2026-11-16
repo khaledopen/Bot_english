@@ -57,3 +57,13 @@ Le bot est en ligne et prêt à discuter !
    - `/level` : Changer ton niveau d'anglais à tout moment.
    - `/reset` : Effacer la mémoire pour commencer un nouveau sujet de discussion.
    - `/help` : Afficher l'aide.
+
+
+## Canal privé d’administration
+
+1. Crée un canal **privé** nommé « EnglishMate AI Admin » dans Telegram. Ajoute le bot comme administrateur avec le droit de publier.
+2. Publie un message dans le canal et copie son lien. Pour un lien du type t.me/c/1234567890/1, utilise ADMIN_CHANNEL_ID=-1001234567890. Indique ton identifiant Telegram numérique dans ADMIN_USER_ID.
+3. Sur Render, configure ADMIN_USER_ID, ADMIN_CHANNEL_ID et ADMIN_DATABASE_URL. Pour ADMIN_DATABASE_URL, utilise une URL de connexion PostgreSQL avec TLS, depuis Neon Free par exemple. Le bot crée sa table au premier accès. En développement local, le registre utilise ADMIN_ACTIVITY_FILE si aucune URL PostgreSQL ne lui est fournie.
+4. Envoie /admin_stats au bot en message direct depuis le compte administrateur. Le canal reçoit une notification par nouvel utilisateur suivi, avec son nom Telegram, son identifiant et le total. Les textes, vocaux et transcriptions restent en dehors du canal.
+
+Le compteur démarre avec les interactions observées après activation. Un utilisateur existant est compté quand il interagit à nouveau.
