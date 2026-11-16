@@ -1,3 +1,4 @@
+const path = require('node:path');
 const { Pool } = require('pg');
 
 function describeFailure(error) {
@@ -11,9 +12,18 @@ function describeFailure(error) {
     : 'UNKNOWN_DATABASE_ERROR';
 }
 
+function withSupabaseCertificate(connectionString) {
+  const url = URL.parse(connectionString);
+  if (!url?.hostname.endsWith('.pooler.supabase.com')) return connectionString;
+
+  url.searchParams.set('sslmode', 'verify-full');
+  url.searchParams.set('sslrootcert', path.join(__dirname, 'supabase-prod-ca-2021.crt'));
+  return url.toString();
+}
+
 function createPostgresActivity(connectionString) {
   const pool = new Pool({
-    connectionString,
+    connectionString: withSupabaseCertificate(connectionString),
     max: 3,
     connectionTimeoutMillis: 10000,
     query_timeout: 10000,
