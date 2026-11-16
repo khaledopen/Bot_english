@@ -106,6 +106,17 @@ function installAdminActivity(bot, env = process.env) {
     }
     return next();
   });
+  return async () => {
+    try {
+      await store.count();
+      return { status: 'ok' };
+    } catch (error) {
+      return { status: 'unavailable', reason: databaseUrl
+        ? require('./admin-postgres.cjs').describeFailure(error)
+        : 'LOCAL_STORE_ERROR' };
+    }
+  };
+
 }
 
 module.exports = { installAdminActivity };

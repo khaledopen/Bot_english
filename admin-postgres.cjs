@@ -69,4 +69,4 @@ function createPostgresActivity(connectionString) {
   };
 }
 
-module.exports = { createPostgresActivity };
+module.exports = { createPostgresActivity, describeFailure };

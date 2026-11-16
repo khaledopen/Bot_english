@@ -87,6 +87,7 @@ function readJsonBody(req, maxBytes = 2 * 1024 * 1024) {
 }
 
 // Serveur HTTP léger : Webhook Telegram + routes /ping, /health, /status (compatible GET & HEAD)
+const probeAdminDatabase = require('./admin-activity.cjs').installAdminActivity(bot);
 const PORT = process.env.PORT || 3000;
 const server = http.createServer(async (req, res) => {
   const pathname = (req.url || '/').split('?')[0];
@@ -125,6 +126,17 @@ const server = http.createServer(async (req, res) => {
       timestamp: new Date().toISOString()
     }, null, 2);
     return sendResponse(res, req.method, 200, 'application/json', payload);
+  }
+
+  if (pathname === '/admin-db-health' && req.method === 'POST') {
+    const supplied = Buffer.from(String(req.headers['x-admin-diagnostic'] || ''));
+    const expected = crypto.createHash('sha256').update('admin-db-health:' + BOT_TOKEN).digest('hex');
+    const key = Buffer.from(expected);
+    if (supplied.length !== key.length || !crypto.timingSafeEqual(supplied, key)) {
+      return sendResponse(res, req.method, 404, 'text/plain; charset=utf-8', 'Not found');
+    }
+    const result = probeAdminDatabase ? await probeAdminDatabase() : { status: 'disabled' };
+    return sendResponse(res, req.method, 200, 'application/json', JSON.stringify(result));
   }
 
   // Route de diagnostic complet (vérifie la connexion Telegram)
@@ -179,7 +191,7 @@ server.listen(PORT, () => {
 
 const FOOTER_SIGNATURE = "\n\n_byBEn10_";
 
-require('./admin-activity.cjs').installAdminActivity(bot);
+
 
 // Commande /start
 bot.start(async (ctx) => {
