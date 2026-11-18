@@ -11,6 +11,9 @@ const digest = value => createHash('sha256').update(value).digest('hex');
 const COOKIE = 'englishmate_session';
 const SESSION_SECONDS = 14 * 24 * 60 * 60;
 let hashes = 0;
+const SUPABASE_HASH = 'supabase-auth';
+const supabaseUrl = () => (process.env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
+const supabaseKey = () => (process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
 
 class WebError extends Error {
   constructor(status, message) {
@@ -40,6 +43,43 @@ async function verifyPassword(password, hash) {
   const [, , salt, expected] = (hash || '').split('$');
   const key = await passwordKey(password, salt ? Buffer.from(salt, 'hex') : Buffer.alloc(saltSize));
   return Boolean(expected && timingSafeEqual(key, Buffer.from(expected, 'hex')));
+}
+
+async function supabaseRequest(path, init = {}) {
+  const url = supabaseUrl();
+  const key = supabaseKey();
+  if (!url || !key) throw new WebError(503, 'La connexion par email n’est pas encore configurée.');
+  try {
+    return await fetch(`${url}/auth/v1/${path}`, {
+      ...init,
+      headers: { apikey: key, 'Content-Type': 'application/json', ...init.headers },
+      signal: AbortSignal.timeout(10000),
+    });
+  } catch {
+    throw new WebError(503, 'Le service de connexion est indisponible. Réessaie.');
+  }
+}
+
+async function supabaseUser(token) {
+  const expired = () => new WebError(401, 'Ta session a expiré. Reconnecte-toi.');
+  if (typeof token !== 'string' || token.length > 8192 || !/^[\w-]+\.[\w-]+\.[\w-]+$/.test(token)) throw expired();
+  const response = await supabaseRequest('user', { headers: { Authorization: `Bearer ${token}` } });
+  if (response.status === 401 || response.status === 403) throw expired();
+  if (!response.ok) throw new WebError(503, 'Le service de connexion est indisponible. Réessaie.');
+  const user = await response.json().catch(() => null);
+  if (!user?.id || typeof user.email !== 'string') throw expired();
+  if (!user.email_confirmed_at) throw new WebError(403, 'Confirme ton adresse email avant de te connecter.');
+  return user;
+}
+
+async function verifySupabasePassword(account, password) {
+  if (typeof password !== 'string' || !password || password.length > 128) return false;
+  const response = await supabaseRequest('token?grant_type=password', {
+    method: 'POST', body: JSON.stringify({ email: account.username, password }),
+  });
+  if (!response.ok) return false;
+  const session = await response.json().catch(() => null);
+  return session?.user?.id === account.id;
 }
 
 function publicAccount(account) {
@@ -86,6 +126,22 @@ function createAuth(store, { secure = true } = {}) {
 
   return {
     getAccount,
+    async supabaseSession(body, req, res) {
+      const user = await supabaseUser(body.accessToken);
+      const email = user.email.trim().toLowerCase();
+      const result = await store.transaction(async client => {
+        await client.query(`UPDATE englishmate_web.accounts SET username = username || '#' || left(id::text, 8)
+          WHERE username = $1 AND id <> $2`, [email, user.id]);
+        const { rows } = await client.query(`INSERT INTO englishmate_web.accounts (id, username, password_hash)
+          VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET username = excluded.username
+          RETURNING id, username, preferences`, [user.id, email, SUPABASE_HASH]);
+        const previous = tokenHash(req);
+        if (previous) await client.query('DELETE FROM englishmate_web.sessions WHERE token_hash = $1', [previous]);
+        return { account: rows[0], token: await createSession(client, user.id) };
+      });
+      writeCookie(res, result.token);
+      return { account: publicAccount(result.account) };
+    },
     async available(body) {
       const username = normalizeUsername(body.username);
       if (!usernamePattern.test(username)) throw new WebError(400, 'Pseudo invalide.');
@@ -146,10 +202,17 @@ function createAuth(store, { secure = true } = {}) {
       return { ok: true };
     },
     async deleteAccount(account, body, res) {
-      if (!await verifyPassword(body.password, account.password_hash)) throw new WebError(401, 'Mot de passe incorrect.');
+      const valid = account.password_hash === SUPABASE_HASH
+        ? await verifySupabasePassword(account, body.password)
+        : await verifyPassword(body.password, account.password_hash);
+      if (!valid) throw new WebError(401, 'Mot de passe incorrect.');
       const { rowCount } = await store.query('DELETE FROM englishmate_web.accounts WHERE id = $1 AND password_hash = $2', [account.id, account.password_hash]);
       if (!rowCount) throw new WebError(409, 'Les identifiants ont changé. Réessaie.');
       writeCookie(res, '', 0);
+      const secret = (process.env.SUPABASE_SECRET_KEY || '').trim();
+      if (account.password_hash === SUPABASE_HASH && secret) {
+        await supabaseRequest(`admin/users/${account.id}`, { method: 'DELETE', headers: { apikey: secret } }).catch(() => null);
+      }
       return { ok: true };
     },
   };

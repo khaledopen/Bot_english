@@ -160,7 +160,7 @@ function createAccountApi(store, tutor, options) {
     }
   }
 
-  const publicRoutes = new Set(['available', 'register', 'login', 'recover', 'logout']);
+  const publicRoutes = new Set(['available', 'register', 'login', 'recover', 'logout', 'supabase-session']);
   return async (req, res, route, url) => {
     try {
       const forwarded = req.headers['x-forwarded-for'];
@@ -168,7 +168,7 @@ function createAccountApi(store, tutor, options) {
       throttle(`ip:${address}`, 180, 60000);
       if (publicRoutes.has(route)) {
         if (req.method !== 'POST') throw new WebError(405, 'Méthode indisponible.');
-        const body = await parseBody(req, 4096);
+        const body = await parseBody(req, route === 'supabase-session' ? 12288 : 4096);
         const username = normalizeUsername(body.username).slice(0, 24);
         if (route === 'available') {
           throttle(`available:${address}`, 30, 60000);
@@ -176,6 +176,8 @@ function createAccountApi(store, tutor, options) {
         }
         if (route === 'logout') return reply(res, 200, await auth.logout(req, res));
         throttle(`auth-ip:${address}`, 24, 60000);
+        if (route === 'supabase-session') return reply(res, 200, await auth.supabaseSession(body, req, res));
+        if (route !== 'login') throw new WebError(410, 'Crée ton compte avec ton adresse email.');
         throttle(`auth-user:${username}`, 8, 300000);
         if (route === 'register') return reply(res, 201, await auth.register(body, res));
         if (route === 'login') return reply(res, 200, await auth.login(body, req, res));
