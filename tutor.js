@@ -380,47 +380,111 @@ ${LEVEL_STRUCTURES[level]}`;
   };
 }
 
-/**
- * Génère la note vocale (TTS audio MP3) 100% gratuite pour la réponse en anglais.
- * Parle plus posément et lentement (slow: true) pour que l'utilisateur comprenne distinctement chaque mot.
- */
-async function generateSpeech(textToSpeak, { slow = true } = {}) {
-  try {
-    const cleanText = String(textToSpeak || '')
-      .split('\n').filter(line => !/^\s*(?:🇫🇷|👉|🎯|💡)/u.test(line)).join('\n')
-      .replace(/\s*\([^()]*=[^()]*\)/g, '')
-      .replace(/[*_#`~>]/g, '')
-      .replace(/[❓💡❌✅💬•🔊⟦⟧]/gu, '')
-      .replace(/\s+/g, ' ')
-      .trim();
+// ——— Voix de Nova ———
+// 1) Voix naturelle Groq Orpheus (même clé que le chat) ; 2) repli automatique sur la synthèse Google si elle échoue.
+const NOVA_VOICE = (process.env.NOVA_VOICE || 'hannah').toLowerCase();
+const NOVA_TTS = (process.env.NOVA_TTS || 'groq').toLowerCase();
+const PAUSE_BETWEEN_SENTENCES = { beginner: .45, intermediate: .25, advanced: .12 };
 
-    if (!cleanText) return null;
+function speechText(textToSpeak) {
+  return String(textToSpeak || '')
+    .split('\n').filter(line => !/^\s*(?:🇫🇷|👉|🎯|💡)/u.test(line)).join('\n')
+    .replace(/\s*\([^()]*=[^()]*\)/g, '')
+    .replace(/[*_#`~>]/g, '')
+    .replace(/[❓💡❌✅💬•🔊⟦⟧]/gu, '')
+    .replace(/\p{Extended_Pictographic}️?/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
-    // Découper proprement jusqu'à 350 caractères pour une note vocale claire, concise et pédagogique
-    const maxChars = 350;
-    let targetText = cleanText;
-    if (targetText.length > maxChars) {
-      const lastSentenceIndex = targetText.lastIndexOf('.', maxChars);
-      if (lastSentenceIndex > 100) {
-        targetText = targetText.substring(0, lastSentenceIndex + 1);
-      } else {
-        targetText = targetText.substring(0, maxChars);
-      }
+function limitLength(text, maxChars = 350) {
+  if (text.length <= maxChars) return text;
+  const lastSentenceIndex = text.lastIndexOf('.', maxChars);
+  return lastSentenceIndex > 100 ? text.substring(0, lastSentenceIndex + 1) : text.substring(0, maxChars);
+}
+
+// Orpheus accepte 200 caractères par appel : on découpe par phrase (puis par virgule si besoin)
+function sentenceChunks(text, max = 190) {
+  const sentences = text.match(/[^.!?]+[.!?]+["')\]]*|[^.!?]+$/g)?.map(part => part.trim()).filter(Boolean) || [text];
+  const chunks = [];
+  for (const sentence of sentences) {
+    if (sentence.length <= max) { chunks.push(sentence); continue; }
+    let current = '';
+    for (const piece of sentence.split(/(?<=,)\s+|\s+/)) {
+      if ((current + ' ' + piece).trim().length > max) { if (current) chunks.push(current.trim()); current = piece; }
+      else current = `${current} ${piece}`;
     }
-
-    const audioList = await googleTTS.getAllAudioBase64(targetText, {
-      lang: 'en',
-      slow, // plus lent pour débutants et intermédiaires, vitesse naturelle pour le niveau avancé
-      host: 'https://translate.google.com',
-      timeout: 10000,
-    });
-
-    const audioBuffers = audioList.map(item => Buffer.from(item.base64, 'base64'));
-    return Buffer.concat(audioBuffers);
-  } catch (error) {
-    console.error('Erreur génération TTS:', error);
-    return null;
+    if (current.trim()) chunks.push(current.trim());
   }
+  return chunks.slice(0, 6);
+}
+
+function readWav(buffer) {
+  let offset = 12, sampleRate = 24000, channels = 1, bits = 16;
+  while (offset + 8 <= buffer.length) {
+    const id = buffer.toString('ascii', offset, offset + 4);
+    let size = buffer.readUInt32LE(offset + 4);
+    const body = offset + 8;
+    if (id === 'fmt ') { channels = buffer.readUInt16LE(body + 2); sampleRate = buffer.readUInt32LE(body + 4); bits = buffer.readUInt16LE(body + 14); }
+    if (id === 'data') {
+      if (!size || size === 0xffffffff || body + size > buffer.length) size = buffer.length - body; // flux sans taille connue
+      if (bits !== 16) throw new Error(`WAV ${bits} bits non pris en charge`);
+      const frames = Math.floor(size / 2 / channels);
+      const pcm = new Int16Array(frames);
+      for (let i = 0; i < frames; i++) pcm[i] = buffer.readInt16LE(body + i * 2 * channels); // premier canal
+      return { pcm, sampleRate };
+    }
+    offset = body + size + (size % 2);
+  }
+  throw new Error('WAV sans données audio');
+}
+
+async function encodeMp3(pcm, sampleRate) {
+  const { Mp3Encoder } = await import('@breezystack/lamejs');
+  const encoder = new Mp3Encoder(1, sampleRate, 64);
+  const parts = [];
+  for (let i = 0; i < pcm.length; i += 1152 * 20) {
+    const encoded = encoder.encodeBuffer(pcm.subarray(i, i + 1152 * 20));
+    if (encoded.length) parts.push(Buffer.from(encoded));
+  }
+  const end = encoder.flush();
+  if (end.length) parts.push(Buffer.from(end));
+  return Buffer.concat(parts);
+}
+
+async function groqSpeech(text, level) {
+  const chunks = sentenceChunks(text);
+  const clips = await Promise.all(chunks.map(async input => {
+    const response = await groq.audio.speech.create({ model: 'canopylabs/orpheus-v1-english', voice: NOVA_VOICE, input, response_format: 'wav' });
+    return readWav(Buffer.from(await response.arrayBuffer()));
+  }));
+  const sampleRate = clips[0].sampleRate;
+  const gap = new Int16Array(Math.round(sampleRate * (PAUSE_BETWEEN_SENTENCES[level] ?? .25)));
+  const parts = clips.flatMap((clip, index) => index ? [gap, clip.pcm] : [clip.pcm]);
+  const pcm = new Int16Array(parts.reduce((total, part) => total + part.length, 0));
+  let at = 0;
+  for (const part of parts) { pcm.set(part, at); at += part.length; }
+  return encodeMp3(pcm, sampleRate);
+}
+
+async function googleSpeech(text, slow) {
+  const audioList = await googleTTS.getAllAudioBase64(text, { lang: 'en', slow, host: 'https://translate.google.com', timeout: 10000 });
+  return Buffer.concat(audioList.map(item => Buffer.from(item.base64, 'base64')));
+}
+
+/**
+ * Note vocale MP3 de la réponse anglaise de Nova.
+ * `level` règle les pauses entre les phrases (plus longues pour les débutants) ; `slow` sert au repli Google.
+ */
+async function generateSpeech(textToSpeak, { slow = true, level = slow ? 'beginner' : 'advanced' } = {}) {
+  const text = limitLength(speechText(textToSpeak));
+  if (!text) return null;
+  if (NOVA_TTS === 'groq') {
+    try { return await groqSpeech(text, level); }
+    catch (error) { console.warn('Voix Groq indisponible, repli sur Google :', error?.status || '', error?.message || error); }
+  }
+  try { return await googleSpeech(text, slow); }
+  catch (error) { console.error('Erreur génération TTS:', error); return null; }
 }
 
 module.exports = {

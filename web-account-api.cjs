@@ -95,7 +95,7 @@ function createAccountApi(store, tutor, options) {
   }
 
   async function textToSpeech(text, level) {
-    try { return (await tutor.generateSpeech(text, { slow: level !== 'advanced' }))?.toString('base64') || null; }
+    try { return (await tutor.generateSpeech(text, { slow: level !== 'advanced', level: level || 'intermediate' }))?.toString('base64') || null; }
     catch { return null; }
   }
 

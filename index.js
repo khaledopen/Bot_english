@@ -211,7 +211,7 @@ const FOOTER_SIGNATURE = "\n\n_byBEn10_";
 
 
 const loadSavedLevel = id => probeAdminDatabase?.getLevel?.(id);
-const speechOptions = level => ({ slow: level !== 'advanced' });
+const speechOptions = level => ({ slow: level !== 'advanced', level: level || 'intermediate' });
 const escapeHtml = text => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 // Les parties fautives (⟦…⟧) apparaissent en gras souligné dans Telegram
 async function sendTutorText(ctx, text) {
