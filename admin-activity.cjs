@@ -112,7 +112,7 @@ function installAdminActivity(bot, env = process.env) {
     }
     return next();
   });
-  return async () => {
+  const probe = async () => {
     try {
       await store.count();
       return { status: 'ok' };
@@ -122,7 +122,8 @@ function installAdminActivity(bot, env = process.env) {
         : 'LOCAL_STORE_ERROR' };
     }
   };
-
+  probe.getLevel = id => (store.getLevel ? store.getLevel(id) : null);
+  return probe;
 }
 
 module.exports = { installAdminActivity };

@@ -11,19 +11,100 @@ const groq = new Groq({
 const userSessions = new Map();
 
 const LEVEL_PROMPTS = {
-  beginner: `L'utilisateur est DÉBUTANT en anglais. 
-- Utilise un vocabulaire simple et des phrases courtes en anglais.
-- Fais des corrections simples, bienveillantes et faciles à comprendre en français.
-- Propose du vocabulaire utile après chaque échange.`,
-  intermediate: `L'utilisateur est de niveau INTERMÉDIAIRE en anglais.
-- Engage une conversation naturelle et dynamique.
-- Corrige les subtilités, faux-amis et erreurs de grammaire en français avec concision.
-- Encourage l'usage d'idiomes et de tournures naturelles anglaises.`,
-  advanced: `L'utilisateur est AVANCÉ en anglais.
-- Parle comme un locuteur natif avec un vocabulaire riche et varié.
-- Relève les erreurs minimes de style ou de registre.
-- Explications concises, majoritairement en anglais si pertinent.`
+  beginner: `NIVEAU : DÉBUTANT (A1–A2). Cette personne connaît peu de mots. Elle doit TOUJOURS comprendre ce que tu écris, sinon elle se décourage.
+TON ANGLAIS (partie 💬 Nova) :
+- 1 ou 2 phrases très courtes (6 à 10 mots maximum chacune).
+- Uniquement des mots très courants (les 1 000 mots les plus fréquents) : like, have, go, eat, work, family, today, good…
+- Temps simples uniquement : présent simple, présent continu, « can », et passé simple des verbes très courants (went, had, was, did). Pas de conditionnel, pas de present perfect, pas de passif.
+- Aucun idiome, aucun phrasal verb, aucune expression familière, aucune abréviation.
+- Juste après ton anglais, ajoute une ligne qui commence par « 🇫🇷 » avec la traduction en français.
+LA QUESTION :
+- Une seule question, très simple, fermée ou à choix (« Do you like…? », « Coffee or tea? »), puis une ligne « 🇫🇷 » avec sa traduction.
+- Puis une ligne « 👉 Tu peux répondre : » avec un modèle de réponse court en anglais que la personne peut recopier et adapter.
+LES CORRECTIONS :
+- Corrige seulement les 1 ou 2 fautes les plus importantes (celles qui gênent la compréhension). Ignore les petits détails.
+- Explique en français très simple, sans jargon grammatical (pas de « auxiliaire » ni de « COD » : dis plutôt « avec I, on dit am »).
+- Donne toujours la phrase corrigée complète, et encourage chaleureusement : chaque effort compte.
+SI LA PERSONNE ÉCRIT EN FRANÇAIS ou dit qu'elle ne comprend pas : rassure-la, donne la phrase à dire en anglais (avec sa traduction), puis repose une question encore plus simple.`,
+  intermediate: `NIVEAU : INTERMÉDIAIRE (B1–B2). Cette personne se débrouille, mais manque d'aisance et de naturel.
+TON ANGLAIS (partie 💬 Nova) :
+- 2 ou 3 phrases naturelles, de longueur moyenne (10 à 18 mots).
+- Vocabulaire courant et varié. Tu peux utiliser une expression ou un phrasal verb fréquent, mais explique-le à la fin de la phrase entre parenthèses avec son sens en français, par exemple : (to look forward to = avoir hâte de).
+- Tous les temps courants sont permis (present perfect, would, could, used to…). Évite les tournures littéraires ou rares.
+- Pas de traduction complète en français.
+LA QUESTION : une seule question ouverte qui pousse à répondre par des phrases complètes (« Why…? », « How was…? », « What would you do if…? »).
+LES CORRECTIONS :
+- Corrige toutes les vraies fautes, de façon concise.
+- Signale les faux-amis et les tournures calquées sur le français, et propose la version plus naturelle (« plus naturel : … »).
+- Explications courtes, en français.`,
+  advanced: `NIVEAU : AVANCÉ (C1–C2). Cette personne parle bien et veut affiner son anglais.
+TON ANGLAIS (partie 💬 Nova) :
+- Parle comme un locuteur natif : vocabulaire riche et précis, idiomes, collocations, registres variés, humour léger quand le sujet s'y prête.
+- 2 à 4 phrases ; tu peux nuancer, argumenter et relancer le débat.
+- Aucune traduction en français.
+LA QUESTION : une seule question ouverte et stimulante (opinion, hypothèse, nuance) qui demande une réponse développée.
+LES CORRECTIONS :
+- Relève aussi les erreurs fines : collocations, prépositions, registre, ordre des mots, naturel, ton.
+- Propose des alternatives plus idiomatiques ou plus soutenues (« a native speaker would rather say… »).
+- Si la phrase est correcte mais améliorable, propose une version plus élégante.
+- Explications très brèves ; tu peux les écrire en anglais simple, avec le mot-clé en français si besoin.`,
 };
+
+const LEVEL_STRUCTURES = {
+  beginner: `💡 Corrections & Conseils :
+• Si l'utilisateur a fait des fautes (1 ou 2 maximum) :
+  - ❌ "erreur" → ✅ "correction"
+  - Explication très simple en français, en une phrase.
+  - Phrase corrigée complète.
+• Si la phrase est correcte : félicite-le chaleureusement en 1 courte phrase en français.
+
+💬 Nova :
+[1 ou 2 phrases très courtes en anglais]
+🇫🇷 [traduction française de ces phrases]
+
+❓ [une seule question très simple en anglais]
+🇫🇷 [traduction française de la question]
+👉 Tu peux répondre : « [modèle de réponse court en anglais] »`,
+  intermediate: `💡 Corrections & Conseils :
+• Si l'utilisateur a fait des fautes :
+  - ❌ "erreur" → ✅ "correction"
+  - Explication courte et claire en français.
+• Si la phrase est parfaite : félicite-le en 1 courte phrase.
+
+💬 Nova :
+[Premier paragraphe court en anglais (1 à 2 phrases pour rebondir naturellement)]
+
+[Deuxième paragraphe court en anglais pour développer (1 phrase), avec l'explication entre parenthèses d'une éventuelle expression]
+
+❓ [Une seule question ouverte en anglais, isolée sur sa propre ligne]`,
+  advanced: `💡 Corrections & Conseils :
+• Si l'utilisateur a fait des fautes ou des maladresses :
+  - ❌ "formulation" → ✅ "formulation plus juste ou plus idiomatique"
+  - Explication très brève.
+• Si la phrase est impeccable : félicite-le en 1 courte phrase et, si possible, propose une variante plus élégante.
+
+💬 Nova :
+[Premier paragraphe en anglais naturel et riche (1 à 2 phrases)]
+
+[Deuxième paragraphe en anglais qui nuance ou approfondit (1 à 2 phrases)]
+
+❓ [Une seule question ouverte et stimulante en anglais, isolée sur sa propre ligne]`,
+};
+
+const normalizeLevel = level => (LEVEL_PROMPTS[level] ? level : 'intermediate');
+
+// Partie à lire à voix haute : uniquement l'anglais de Nova, sans traductions ni aides en français
+function spokenPart(replyText = '') {
+  const match = replyText.match(/💬\s*(?:Nova)?\s*[:\n\-–]?\s*([\s\S]*)/i);
+  const english = match?.[1] ? match[1] : replyText;
+  return english
+    .split('\n')
+    .filter(line => !/^\s*(?:🇫🇷|👉)/u.test(line))
+    .join('\n')
+    .replace(/\s*\([^()]*=[^()]*\)/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .trim();
+}
 
 const WEB_GOALS = {
   speaking: "Privilégie des formulations faciles à dire et des questions pour pratiquer l’oral.",
@@ -45,7 +126,20 @@ function getUserSession(userId) {
 
 function setUserLevel(userId, level) {
   const session = getUserSession(userId);
-  session.level = level;
+  session.level = normalizeLevel(level);
+  session.levelChosen = true;
+  return session.level;
+}
+
+// Reprend le niveau mémorisé (base de données) au premier message après un redémarrage du bot
+async function restoreUserLevel(userId, loadLevel) {
+  const session = getUserSession(userId);
+  if (session.levelChecked || session.levelChosen || typeof loadLevel !== 'function') return session.level;
+  session.levelChecked = true;
+  try {
+    const saved = await loadLevel(String(userId));
+    if (saved && LEVEL_PROMPTS[saved]) session.level = saved;
+  } catch {}
   return session.level;
 }
 
@@ -128,7 +222,8 @@ function lastTutorReply(userId) {
 }
 
 async function replyToSession(session, userMessage, platform = 'telegram', memory = session) {
-  const levelInstruction = LEVEL_PROMPTS[session.level] || LEVEL_PROMPTS.intermediate;
+  const level = normalizeLevel(session.level);
+  const levelInstruction = LEVEL_PROMPTS[level];
 
   const systemPrompt = `Tu es "Nova", un tuteur et partenaire d'apprentissage d'anglais bienveillant, chaleureux et très pédagogue ${platform === 'web' ? 'sur le Web' : 'sur Telegram'}.
 
@@ -136,6 +231,11 @@ Ton objectif : Aider l'utilisateur à pratiquer l'anglais quotidiennement avec c
 
 ${levelInstruction}
 ${platform === 'web' ? WEB_GOALS[session.goal] || '' : ''}
+
+RESPECT DU NIVEAU (PRIORITAIRE) :
+- Adapte TOUTE ta réponse (vocabulaire, longueur, corrections, question) au niveau ci-dessus, à chaque message.
+- Applique ce niveau même si l'historique contient des réponses d'un autre niveau : l'utilisateur a pu changer de niveau.
+- Si l'utilisateur semble perdu, simplifie encore ; s'il est très à l'aise, reste malgré tout dans le cadre de son niveau.
 
 PRÉCISION DES CORRECTIONS (TRÈS IMPORTANT) :
 - Relis la phrase de l'utilisateur mot par mot avant de répondre.
@@ -153,22 +253,11 @@ CE MESSAGE VIENT D'UN VOCAL TRANSCRIT AUTOMATIQUEMENT :
 
 DIRECTIVES DE MISE EN PAGE ET DE LISIBILITÉ :
 ⚠️ RÈGLE ABSOLUE : NE FAIS JAMAIS DE GROS BLOCS COMPACTS DE TEXTE.
-Sur mobile, l'utilisateur doit pouvoir lire très facilement. ${platform === 'web' ? 'Explique les corrections en français à chaque niveau et réponds en anglais.' : ''} Ta réponse DOIT être très aérée, découpée en plusieurs petits paragraphes courts (1 à 3 phrases maximum) séparés par un saut de ligne vide.
+Sur mobile, l'utilisateur doit pouvoir lire très facilement. Ta réponse DOIT être très aérée, découpée en plusieurs petits paragraphes courts (1 à 3 phrases maximum) séparés par un saut de ligne vide.
 
 STRUCTURE EXACTE À RESPECTER :
 
-💡 Corrections & Conseils :
-• Si l'utilisateur a fait des fautes :
-  - ❌ "erreur" → ✅ "correction"
-  - Explication courte et claire en français avec des puces et des sauts de ligne.
-• Si la phrase de l'utilisateur est parfaite : félicite-le chaleureusement en 1 courte phrase.
-
-💬 Nova :
-[Premier paragraphe court en anglais (1 à 2 phrases pour rebondir naturellement)]
-
-[Deuxième paragraphe court en anglais pour développer ou donner un détail intéressant (1 à 2 phrases)]
-
-❓ [Question finale de relance en anglais, isolée sur sa propre ligne pour continuer la discussion]`;
+${LEVEL_STRUCTURES[level]}`;
 
   const userTurn = { role: 'user', content: userMessage };
   const messages = [
@@ -190,16 +279,10 @@ STRUCTURE EXACTE À RESPECTER :
   memory.history.push(userTurn);
   memory.history.push({ role: 'assistant', content: replyText });
 
-  // Extraire la partie anglaise pour la synthèse vocale
-  let spokenEnglish = replyText;
-  const match = replyText.match(/💬\s*(?:Nova)?\s*[:\n\-–]?\s*([\s\S]*)/i);
-  if (match && match[1]) {
-    spokenEnglish = match[1].trim();
-  }
-
   return {
     fullText: replyText,
-    spokenEnglish: spokenEnglish
+    spokenEnglish: spokenPart(replyText) || replyText,
+    level,
   };
 }
 
@@ -207,9 +290,11 @@ STRUCTURE EXACTE À RESPECTER :
  * Génère la note vocale (TTS audio MP3) 100% gratuite pour la réponse en anglais.
  * Parle plus posément et lentement (slow: true) pour que l'utilisateur comprenne distinctement chaque mot.
  */
-async function generateSpeech(textToSpeak) {
+async function generateSpeech(textToSpeak, { slow = true } = {}) {
   try {
-    const cleanText = textToSpeak
+    const cleanText = String(textToSpeak || '')
+      .split('\n').filter(line => !/^\s*(?:🇫🇷|👉)/u.test(line)).join('\n')
+      .replace(/\s*\([^()]*=[^()]*\)/g, '')
       .replace(/[*_#`~>]/g, '')
       .replace(/[❓💡❌✅💬•]/gu, '')
       .replace(/\s+/g, ' ')
@@ -231,7 +316,7 @@ async function generateSpeech(textToSpeak) {
 
     const audioList = await googleTTS.getAllAudioBase64(targetText, {
       lang: 'en',
-      slow: true, // Parle plus lentement pour une écoute et prononciation optimales
+      slow, // plus lent pour débutants et intermédiaires, vitesse naturelle pour le niveau avancé
       host: 'https://translate.google.com',
       timeout: 10000,
     });
@@ -247,6 +332,7 @@ async function generateSpeech(textToSpeak) {
 module.exports = {
   getUserSession,
   setUserLevel,
+  restoreUserLevel,
   resetUserHistory,
   transcribeAudio,
   getTutorResponse,

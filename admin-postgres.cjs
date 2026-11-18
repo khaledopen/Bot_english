@@ -91,6 +91,10 @@ function createPostgresActivity(connectionString) {
       const { rows } = await query('SELECT count(*) AS total FROM englishmate_private.admin_activity');
       return rows[0].total;
     },
+    async getLevel(id) {
+      const { rows } = await query('SELECT level FROM englishmate_private.telegram_users WHERE telegram_id = $1', [id]);
+      return rows[0]?.level || null;
+    },
     async track(user, { messages = 0, voice = 0, level = null } = {}) {
       const clean = (value, max) => typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null;
       await query(

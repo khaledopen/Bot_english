@@ -8,6 +8,7 @@ const { createAccountStore } = require('./web-account-store.cjs');
 const {
   getUserSession,
   setUserLevel,
+  restoreUserLevel,
   resetUserHistory,
   transcribeAudio,
   getTutorResponse,
@@ -208,8 +209,12 @@ const FOOTER_SIGNATURE = "\n\n_byBEn10_";
 
 
 
+const loadSavedLevel = id => probeAdminDatabase?.getLevel?.(id);
+const speechOptions = level => ({ slow: level !== 'advanced' });
+
 // Commande /start
 bot.start(async (ctx) => {
+  await restoreUserLevel(ctx.from.id, loadSavedLevel);
   console.log(`👋 [${new Date().toLocaleTimeString()}] /start reçu de ${ctx.from.first_name || 'Utilisateur'}`);
   const session = getUserSession(ctx.from.id);
   const welcomeText = `🇬🇧 *Welcome to your English Coach Bot!*
@@ -313,6 +318,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
 
     // 1. Transcription avec Groq Whisper (gratuit & ultra rapide)
     await ctx.sendChatAction('typing');
+    await restoreUserLevel(ctx.from.id, loadSavedLevel);
     const userTranscript = await transcribeAudio(audioBuffer, 'ogg', 'audio/ogg', lastTutorReply(ctx.from.id));
 
     if (!userTranscript || !userTranscript.trim()) {
@@ -329,7 +335,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
 
     // 3. Synthèse vocale de la réponse anglaise
     await ctx.sendChatAction('record_voice');
-    const voiceBuffer = await generateSpeech(tutorResponse.spokenEnglish);
+    const voiceBuffer = await generateSpeech(tutorResponse.spokenEnglish, speechOptions(tutorResponse.level));
 
     if (voiceBuffer) {
       // Envoyer la note vocale Telegram
@@ -355,6 +361,7 @@ bot.on('text', async (ctx) => {
 
   try {
     await ctx.sendChatAction('typing');
+    await restoreUserLevel(ctx.from.id, loadSavedLevel);
     const tutorResponse = await getTutorResponse(ctx.from.id, userText);
 
     // Envoyer d'abord la réponse texte signée
@@ -363,7 +370,7 @@ bot.on('text', async (ctx) => {
 
     // Générer également le message vocal pour l'écoute
     await ctx.sendChatAction('record_voice');
-    const voiceBuffer = await generateSpeech(tutorResponse.spokenEnglish);
+    const voiceBuffer = await generateSpeech(tutorResponse.spokenEnglish, speechOptions(tutorResponse.level));
     if (voiceBuffer) {
       await ctx.replyWithVoice({ source: voiceBuffer, filename: 'english.mp3' }, { caption: '🎧 Écoute la prononciation anglaise :' });
       console.log(`🎙️ Note vocale envoyée à ${senderName}`);

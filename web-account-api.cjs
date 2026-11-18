@@ -83,8 +83,8 @@ function createAccountApi(store, tutor, options) {
     return account;
   }
 
-  async function textToSpeech(text) {
-    try { return (await tutor.generateSpeech(text))?.toString('base64') || null; }
+  async function textToSpeech(text, level) {
+    try { return (await tutor.generateSpeech(text, { slow: level !== 'advanced' }))?.toString('base64') || null; }
     catch { return null; }
   }
 
@@ -130,7 +130,7 @@ function createAccountApi(store, tutor, options) {
         WHERE t.id = $1 AND c.id = $2 AND c.account_id = $3`, [turnId, conversationId, account.id]);
       if (saved.rows[0]) {
         const { spoken, ...turn } = saved.rows[0];
-        return { turn, audio: mode === 'voice' ? await textToSpeech(spoken) : null };
+        return { turn, audio: mode === 'voice' ? await textToSpeech(spoken, account.preferences?.level) : null };
       }
       const existing = await store.query('SELECT mode FROM englishmate_web.conversations WHERE id = $1 AND account_id = $2', [conversationId, account.id]);
       if (existing.rows[0] && existing.rows[0].mode !== mode) throw bad('Format incompatible avec cette conversation.');
@@ -164,7 +164,7 @@ function createAccountApi(store, tutor, options) {
         [turnId, conversationId, message, result.fullText, result.spokenEnglish, seconds]);
         return rows[0];
       });
-      return { turn, audio: mode === 'voice' ? await textToSpeech(result.spokenEnglish) : null };
+      return { turn, audio: mode === 'voice' ? await textToSpeech(result.spokenEnglish, account.preferences?.level) : null };
     } finally {
       busy.delete(account.id);
     }
@@ -302,7 +302,7 @@ function createAccountApi(store, tutor, options) {
           JOIN englishmate_web.conversations c ON c.id = t.conversation_id
           WHERE t.id = $1 AND c.account_id = $2`, [body.turnId, id]);
         if (!rows[0]) throw missing();
-        const audio = await textToSpeech(rows[0].spoken);
+        const audio = await textToSpeech(rows[0].spoken, account.preferences?.level);
         if (!audio) throw new WebError(502, 'La réponse audio est temporairement indisponible.');
         return reply(res, 200, { audio });
       }
