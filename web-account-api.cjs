@@ -77,6 +77,17 @@ function createAccountApi(store, tutor, options) {
     if (++rate.count > limit) throw new WebError(429, 'Trop de demandes. Réessaie dans quelques minutes.');
   }
 
+  // Les enregistrements vocaux sont gardés 30 jours (la transcription reste) ; nettoyage au plus une fois par heure
+  let voiceCleanupAt = 0;
+  function cleanupVoices() {
+    const now = Date.now();
+    if (now < voiceCleanupAt) return;
+    voiceCleanupAt = now + 3600000;
+    store.query(`UPDATE englishmate_web.turns SET voice = NULL, voice_type = NULL
+      WHERE voice IS NOT NULL AND created_at < now() - interval '30 days'`)
+      .catch(error => { voiceCleanupAt = 0; console.warn('[web-api] nettoyage des vocaux', describeFailure(error)); });
+  }
+
   async function requireAccount(req) {
     const account = await auth.getAccount(req);
     if (!account) throw new WebError(401, 'Connecte-toi pour continuer.');
@@ -204,6 +215,7 @@ function createAccountApi(store, tutor, options) {
         return reply(res, 200, await auth.recover(body, res));
       }
       const account = await requireAccount(req);
+      cleanupVoices();
       const id = account.id;
       if (req.method === 'GET') {
         if (route === 'me') return reply(res, 200, { account: publicAccount(account) });
