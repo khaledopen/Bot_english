@@ -50,13 +50,27 @@ LES CORRECTIONS :
 - Explications très brèves ; tu peux les écrire en anglais simple, avec le mot-clé en français si besoin.`,
 };
 
+// Bloc de corrections commun : on montre OÙ est l'erreur, puis la phrase entière corrigée
+const CORRECTION_BLOCK = {
+  beginner: `💡 Corrections :
+📍 Ta phrase : [recopie la phrase de l'utilisateur à l'identique, en entourant CHAQUE partie fautive de ⟦ ⟧]
+• ⟦partie fautive⟧ → ✅ correction : explication très simple en français, en une phrase (1 ou 2 fautes maximum)
+✍️ Phrase corrigée : [la phrase entière, corrigée]
+(Si la phrase est correcte : « ✅ Phrase correcte : [sa phrase] » puis une courte félicitation en français.)`,
+  intermediate: `💡 Corrections :
+📍 Ta phrase : [recopie la phrase de l'utilisateur à l'identique, en entourant CHAQUE partie fautive de ⟦ ⟧]
+• ⟦partie fautive⟧ → ✅ correction : explication courte en français (une ligne par faute ; ajoute « plus naturel : … » pour un calque du français)
+✍️ Phrase corrigée : [la phrase entière, corrigée et naturelle]
+(Si la phrase est correcte : « ✅ Phrase correcte : [sa phrase] » et une courte félicitation.)`,
+  advanced: `💡 Corrections :
+📍 Ta phrase : [recopie la phrase de l'utilisateur à l'identique, en entourant CHAQUE partie fautive ou maladroite de ⟦ ⟧]
+• ⟦partie fautive⟧ → ✅ formulation plus juste ou plus idiomatique : explication très brève
+✍️ Phrase corrigée : [la phrase entière, dans sa meilleure version]
+(Si la phrase est impeccable : « ✅ Phrase correcte : [sa phrase] » puis, si possible, une variante plus élégante.)`,
+};
+
 const LEVEL_STRUCTURES = {
-  beginner: `💡 Corrections & Conseils :
-• Si l'utilisateur a fait des fautes (1 ou 2 maximum) :
-  - ❌ "erreur" → ✅ "correction"
-  - Explication très simple en français, en une phrase.
-  - Phrase corrigée complète.
-• Si la phrase est correcte : félicite-le chaleureusement en 1 courte phrase en français.
+  beginner: `${CORRECTION_BLOCK.beginner}
 
 💬 Nova :
 [1 ou 2 phrases très courtes en anglais]
@@ -65,11 +79,7 @@ const LEVEL_STRUCTURES = {
 ❓ [une seule question très simple en anglais]
 🇫🇷 [traduction française de la question]
 👉 Tu peux répondre : « [modèle de réponse court en anglais] »`,
-  intermediate: `💡 Corrections & Conseils :
-• Si l'utilisateur a fait des fautes :
-  - ❌ "erreur" → ✅ "correction"
-  - Explication courte et claire en français.
-• Si la phrase est parfaite : félicite-le en 1 courte phrase.
+  intermediate: `${CORRECTION_BLOCK.intermediate}
 
 💬 Nova :
 [Premier paragraphe court en anglais (1 à 2 phrases pour rebondir naturellement)]
@@ -77,11 +87,7 @@ const LEVEL_STRUCTURES = {
 [Deuxième paragraphe court en anglais pour développer (1 phrase), avec l'explication entre parenthèses d'une éventuelle expression]
 
 ❓ [Une seule question ouverte en anglais, isolée sur sa propre ligne]`,
-  advanced: `💡 Corrections & Conseils :
-• Si l'utilisateur a fait des fautes ou des maladresses :
-  - ❌ "formulation" → ✅ "formulation plus juste ou plus idiomatique"
-  - Explication très brève.
-• Si la phrase est impeccable : félicite-le en 1 courte phrase et, si possible, propose une variante plus élégante.
+  advanced: `${CORRECTION_BLOCK.advanced}
 
 💬 Nova :
 [Premier paragraphe en anglais naturel et riche (1 à 2 phrases)]
@@ -89,6 +95,71 @@ const LEVEL_STRUCTURES = {
 [Deuxième paragraphe en anglais qui nuance ou approfondit (1 à 2 phrases)]
 
 ❓ [Une seule question ouverte et stimulante en anglais, isolée sur sa propre ligne]`,
+};
+
+// Défis réguliers : traduire un mot, prononcer une phrase, comprendre une expression
+const CHALLENGE_LEVELS = {
+  beginner: `Choisis UN défi de niveau débutant, avec des mots très courants :
+- « 🎯 Défi : Comment dit-on « [mot français simple : une pomme, la cuisine, j'ai faim…] » en anglais ? »
+- ou « 🎯 Défi prononciation : Lis cette phrase à voix haute et envoie-moi un vocal 🎙️ » suivi d'une ligne « 🔊 [phrase anglaise très courte, 4 à 7 mots] »
+- ou « 🎯 Défi : Que veut dire « [mot ou expression très simple : Nice to meet you, I'm starving…] » ? »
+Ajoute ensuite une ligne « 💡 Indice : … » en français (première lettre, mot qui ressemble, etc.).`,
+  intermediate: `Choisis UN défi de niveau intermédiaire :
+- « 🎯 Défi : Comment dit-on « [expression française courante : avoir hâte, se débrouiller, ça vaut le coup…] » en anglais ? »
+- ou « 🎯 Défi prononciation : Lis cette phrase à voix haute et envoie-moi un vocal 🎙️ » suivi d'une ligne « 🔊 [phrase avec des sons difficiles pour un francophone : th, h aspiré, -ed, voyelles longues/courtes] »
+- ou « 🎯 Défi : Que veut dire « [phrasal verb ou expression : to run out of, it's up to you, to call it a day…] » ? »`,
+  advanced: `Choisis UN défi de niveau avancé :
+- « 🎯 Défi : Comment dirais-tu « [tournure française nuancée ou idiomatique : poser un lapin, avoir le cafard, c'est la goutte d'eau…] » en anglais ? »
+- ou « 🎯 Défi prononciation : Lis cette phrase à voix haute et envoie-moi un vocal 🎙️ » suivi d'une ligne « 🔊 [phrase exigeante : accent tonique, mots piégeux comme thorough, comfortable, Worcestershire, rythme] »
+- ou « 🎯 Défi : Que veut dire « [idiome ou expression soutenue : to beat around the bush, a blessing in disguise…] » et dans quel contexte l'utiliser ? »`,
+};
+
+function challengeInstructions(level, { challenge, answering, inputMode }) {
+  const parts = [];
+  if (answering) parts.push(`L'UTILISATEUR RÉPOND PEUT-ÊTRE À TON DERNIER DÉFI (ligne 🎯 de ta réponse précédente) :
+- Si c'est le cas, ajoute AVANT « 💬 Nova » une section « 🎯 Résultat du défi : » :
+  • ✅ Bravo ou ❌ Pas tout à fait, en le disant gentiment.
+  • La bonne réponse, avec son explication en français : sens, quand l'utiliser, et un exemple de phrase en anglais.
+  • Pour un mot ou une phrase à prononcer : une astuce de prononciation simple, écrite « à la française » (ex. : thought → « ssôt », langue entre les dents).
+${inputMode === 'voice' ? '  • C\'était un vocal : compare ce que tu as reçu (transcription) à la phrase demandée ; un mot différent signale souvent un son mal prononcé, explique lequel et comment le corriger.' : '  • Si c\'était un défi de prononciation et qu\'il a répondu par écrit, encourage-le à envoyer un vocal 🎙️.'}
+- S'il ignore le défi et parle d'autre chose, n'insiste pas : donne quand même la réponse en une ligne dans « 🎯 Résultat du défi ».`);
+  if (challenge) parts.push(`DONNE UN NOUVEAU DÉFI DANS CETTE RÉPONSE :
+- Place-le à la toute fin, À LA PLACE de la ligne ❓ (pas de question en plus : le défi est la question).
+- ${CHALLENGE_LEVELS[level]}
+- Le défi doit rester adapté au niveau et, si possible, lié au sujet de la conversation.`);
+  else parts.push('PAS DE NOUVEAU DÉFI dans cette réponse : termine par la question ❓ habituelle.');
+  return parts.join('\n\n');
+}
+
+// Message d'ouverture d'une nouvelle conversation après un changement de niveau
+const LEVEL_OPENERS = {
+  beginner: `🔄 Nouvelle conversation · Niveau Débutant 🟢
+
+Je vais parler simplement : phrases courtes, mots faciles et traduction en français. Tu peux aussi m'écrire en français si tu bloques.
+
+💬 Nova :
+Hello! Let's start again. 😊
+🇫🇷 Bonjour ! On recommence.
+
+❓ What is your name?
+🇫🇷 Comment tu t'appelles ?
+👉 Tu peux répondre : « My name is … »`,
+  intermediate: `🔄 Nouvelle conversation · Niveau Intermédiaire 🟡
+
+Je parle plus naturellement, j'explique les expressions entre parenthèses et je corrige toutes tes fautes.
+
+💬 Nova :
+Great, let's start a fresh conversation! I'm curious to hear how your week is going.
+
+❓ What did you do last weekend?`,
+  advanced: `🔄 Nouvelle conversation · Niveau Avancé 🔴
+
+Anglais natif, sans traduction, avec des corrections fines de style et de registre.
+
+💬 Nova:
+Brilliant, let's raise the bar a little. I'll be picky about nuance and natural phrasing from now on.
+
+❓ If you could master any skill overnight, what would it be, and why?`,
 };
 
 const normalizeLevel = level => (LEVEL_PROMPTS[level] ? level : 'intermediate');
@@ -99,7 +170,8 @@ function spokenPart(replyText = '') {
   const english = match?.[1] ? match[1] : replyText;
   return english
     .split('\n')
-    .filter(line => !/^\s*(?:🇫🇷|👉)/u.test(line))
+    .filter(line => !/^\s*(?:🇫🇷|👉|🎯|💡)/u.test(line))
+    .map(line => line.replace(/^\s*🔊\s*/u, ''))
     .join('\n')
     .replace(/\s*\([^()]*=[^()]*\)/g, '')
     .replace(/[ \t]+\n/g, '\n')
@@ -214,7 +286,24 @@ function formatTutorReply(rawText) {
  * Génère la réponse du tuteur d'anglais avec Groq
  */
 async function getTutorResponse(userId, userMessage, options = {}) {
-  return replyToSession({ ...getUserSession(userId), ...options, history: getUserSession(userId).history }, userMessage, 'telegram', getUserSession(userId));
+  const session = getUserSession(userId);
+  return replyToSession({ ...session, ...challengeState(session.history), ...options, history: session.history }, userMessage, 'telegram', session);
+}
+
+// Un défi toutes les trois réponses ; on signale aussi quand l'utilisateur répond au défi précédent
+function challengeState(history = []) {
+  const replies = history.filter(turn => turn.role === 'assistant')
+  const answers = replies.filter(turn => !turn.opener).length
+  return { challenge: answers % 3 === 2, answeringChallenge: /🎯\s*Défi/u.test(replies.at(-1)?.content || '') }
+}
+
+// Nouvelle conversation après un changement de niveau (Telegram)
+function startLevelConversation(userId, level) {
+  const session = getUserSession(userId);
+  session.level = normalizeLevel(level);
+  session.levelChosen = true;
+  session.history = [{ role: 'assistant', content: LEVEL_OPENERS[session.level], opener: true }];
+  return LEVEL_OPENERS[session.level];
 }
 
 function lastTutorReply(userId) {
@@ -242,7 +331,9 @@ PRÉCISION DES CORRECTIONS (TRÈS IMPORTANT) :
 - Corrige TOUTES les vraies erreurs : conjugaison et temps, accords, articles, prépositions, ordre des mots, vocabulaire, faux-amis, tournures calquées sur le français.
 - N'invente JAMAIS d'erreur et ne « corrige » pas une phrase déjà correcte : dans ce cas, dis-le clairement.
 - Distingue une vraie faute d'une formulation simplement moins naturelle (« plus naturel : … »).
-- Quand il y a des fautes, donne aussi la phrase complète corrigée.
+- Montre TOUJOURS où est l'erreur : recopie la phrase de l'utilisateur dans « 📍 Ta phrase : » en entourant chaque partie fautive de ⟦ ⟧ (exemple : « Yesterday I ⟦go⟧ to the market »), puis explique chaque faute, puis donne la phrase entière corrigée dans « ✍️ Phrase corrigée : ».
+- Les marques ⟦ ⟧ ne servent QUE dans la ligne 📍 et les puces d'erreur ; n'en mets jamais ailleurs.
+- S'il a écrit plusieurs phrases, ne recopie dans 📍 que celles qui contiennent une faute.
 - Garde le sens exact de ce que l'utilisateur voulait dire ; ne change pas son idée.
 ${session.inputMode === 'voice' ? `
 CE MESSAGE VIENT D'UN VOCAL TRANSCRIT AUTOMATIQUEMENT :
@@ -250,6 +341,9 @@ CE MESSAGE VIENT D'UN VOCAL TRANSCRIT AUTOMATIQUEMENT :
 - Ne corrige pas l'orthographe, seulement ce qui s'entend : grammaire, vocabulaire, structure.
 - Si un mot semble mal reconnu à cause de la prononciation (mot absurde dans le contexte), propose gentiment le mot probable et une astuce de prononciation simple.
 - Ajoute un court conseil d'oral (prononciation, rythme ou intonation) quand c'est utile.` : ''}
+
+DÉFIS :
+${challengeInstructions(level, { challenge: !!session.challenge, answering: !!session.answeringChallenge, inputMode: session.inputMode })}
 
 DIRECTIVES DE MISE EN PAGE ET DE LISIBILITÉ :
 ⚠️ RÈGLE ABSOLUE : NE FAIS JAMAIS DE GROS BLOCS COMPACTS DE TEXTE.
@@ -262,7 +356,7 @@ ${LEVEL_STRUCTURES[level]}`;
   const userTurn = { role: 'user', content: userMessage };
   const messages = [
     { role: 'system', content: systemPrompt },
-    ...session.history.slice(-18),
+    ...session.history.slice(-18).map(({ role, content }) => ({ role, content })),
     userTurn,
   ];
 
@@ -293,10 +387,10 @@ ${LEVEL_STRUCTURES[level]}`;
 async function generateSpeech(textToSpeak, { slow = true } = {}) {
   try {
     const cleanText = String(textToSpeak || '')
-      .split('\n').filter(line => !/^\s*(?:🇫🇷|👉)/u.test(line)).join('\n')
+      .split('\n').filter(line => !/^\s*(?:🇫🇷|👉|🎯|💡)/u.test(line)).join('\n')
       .replace(/\s*\([^()]*=[^()]*\)/g, '')
       .replace(/[*_#`~>]/g, '')
-      .replace(/[❓💡❌✅💬•]/gu, '')
+      .replace(/[❓💡❌✅💬•🔊⟦⟧]/gu, '')
       .replace(/\s+/g, ' ')
       .trim();
 
@@ -330,6 +424,10 @@ async function generateSpeech(textToSpeak, { slow = true } = {}) {
 }
 
 module.exports = {
+  LEVEL_OPENERS,
+  challengeState,
+  startLevelConversation,
+  normalizeLevel,
   getUserSession,
   setUserLevel,
   restoreUserLevel,

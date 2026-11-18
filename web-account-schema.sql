@@ -51,3 +51,11 @@ CREATE TABLE IF NOT EXISTS englishmate_web.vocabulary (
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (account_id, term)
 );
+
+-- Niveau de chaque conversation (un changement de niveau ouvre une nouvelle conversation)
+ALTER TABLE englishmate_web.conversations ADD COLUMN IF NOT EXISTS level text;
+UPDATE englishmate_web.conversations c SET level = coalesce(a.preferences->>'level', 'intermediate')
+  FROM englishmate_web.accounts a WHERE c.level IS NULL AND a.id = c.account_id;
+-- Vocal de l'utilisateur, pour pouvoir le réécouter plus tard
+ALTER TABLE englishmate_web.turns ADD COLUMN IF NOT EXISTS voice bytea;
+ALTER TABLE englishmate_web.turns ADD COLUMN IF NOT EXISTS voice_type text;

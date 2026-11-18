@@ -92,8 +92,8 @@ function createAccountApi(store, tutor, options) {
     if (!validId(id)) throw bad('Conversation invalide.');
     if (before !== null && !validId(before)) throw bad('Repère de conversation invalide.');
     const { rows } = await store.query(`
-      SELECT id, message, reply, seconds, created_at FROM (
-        SELECT t.id, t.message, t.reply, t.seconds, t.created_at
+      SELECT id, message, reply, seconds, created_at, has_voice FROM (
+        SELECT t.id, t.message, t.reply, t.seconds, t.created_at, t.voice IS NOT NULL AS has_voice
         FROM englishmate_web.turns t JOIN englishmate_web.conversations c ON c.id = t.conversation_id
         WHERE c.id = $1 AND c.account_id = $2 AND
           ($4::uuid IS NULL OR (t.created_at, t.id) < (
@@ -105,13 +105,17 @@ function createAccountApi(store, tutor, options) {
     return rows;
   }
 
-  async function recentTurns(accountId, limit = 9) {
+  async function recentTurns(accountId, level, limit = 9) {
     const { rows } = await store.query(`
       SELECT message, reply FROM (
         SELECT t.message, t.reply, t.created_at, t.id FROM englishmate_web.turns t
         JOIN englishmate_web.conversations c ON c.id = t.conversation_id
-        WHERE c.account_id = $1 ORDER BY t.created_at DESC, t.id DESC LIMIT $2
-      ) recent ORDER BY created_at, id`, [accountId, limit]);
+        WHERE c.account_id = $1 AND c.level = $3 AND t.created_at > coalesce((
+          SELECT max(t2.created_at) FROM englishmate_web.turns t2
+          JOIN englishmate_web.conversations c2 ON c2.id = t2.conversation_id
+          WHERE c2.account_id = $1 AND c2.level IS DISTINCT FROM $3), '-infinity'::timestamptz)
+        ORDER BY t.created_at DESC, t.id DESC LIMIT $2
+      ) recent ORDER BY created_at, id`, [accountId, limit, level]);
     return rows;
   }
 
@@ -132,11 +136,14 @@ function createAccountApi(store, tutor, options) {
         const { spoken, ...turn } = saved.rows[0];
         return { turn, audio: mode === 'voice' ? await textToSpeech(spoken, account.preferences?.level) : null };
       }
-      const existing = await store.query('SELECT mode FROM englishmate_web.conversations WHERE id = $1 AND account_id = $2', [conversationId, account.id]);
+      const level = tutor.normalizeLevel(account.preferences.level);
+      const existing = await store.query('SELECT mode, level FROM englishmate_web.conversations WHERE id = $1 AND account_id = $2', [conversationId, account.id]);
       if (existing.rows[0] && existing.rows[0].mode !== mode) throw bad('Format incompatible avec cette conversation.');
+      if (existing.rows[0] && existing.rows[0].level && existing.rows[0].level !== level) throw new WebError(409, 'Ton niveau a changé : une nouvelle conversation va commencer.');
       let message;
       let seconds = 0;
-      const past = await recentTurns(account.id, 9);
+      let voice = null;
+      const past = await recentTurns(account.id, level, 9);
       if (mode === 'voice') {
         const audio = decodeAudio(body);
         let transcript;
@@ -145,23 +152,26 @@ function createAccountApi(store, tutor, options) {
         message = transcript?.trim().slice(0, 1500);
         if (!message) throw new WebError(422, 'Je n’ai pas bien entendu ton vocal. Parle un peu plus fort, près du micro, puis réessaie.');
         seconds = Math.max(1, Math.min(45, Math.round(Number(body.seconds) || 1)));
+        voice = audio;
       } else {
         message = typeof body.text === 'string' ? body.text.trim() : '';
         if (!message || message.length > 1500) throw bad('Écris un message de 1 à 1 500 caractères.');
       }
-      const history = past.flatMap(turn => [{ role: 'user', content: turn.message }, { role: 'assistant', content: turn.reply }]);
+      // La conversation d'un niveau commence par le message d'ouverture de Nova dans ce niveau
+      const history = [{ role: 'assistant', content: tutor.LEVEL_OPENERS[level], opener: true },
+        ...past.flatMap(turn => [{ role: 'user', content: turn.message }, { role: 'assistant', content: turn.reply }])];
       let result;
-      try { result = await tutor.replyToSession({ ...account.preferences, history, inputMode: mode }, message, 'web'); }
+      try { result = await tutor.replyToSession({ ...account.preferences, level, history, inputMode: mode, ...tutor.challengeState(history) }, message, 'web'); }
       catch { throw new WebError(502, 'Le coach ne répond pas pour le moment. Réessaie.'); }
       const turn = await store.transaction(async client => {
-        await client.query(`INSERT INTO englishmate_web.conversations (id, account_id, title, mode)
-          VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`, [conversationId, account.id, message.slice(0, 72), mode]);
+        await client.query(`INSERT INTO englishmate_web.conversations (id, account_id, title, mode, level)
+          VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`, [conversationId, account.id, message.slice(0, 72), mode, level]);
         const ownership = await client.query(`UPDATE englishmate_web.conversations SET updated_at = now()
           WHERE id = $1 AND account_id = $2 AND mode = $3`, [conversationId, account.id, mode]);
         if (!ownership.rowCount) throw missing();
-        const { rows } = await client.query(`INSERT INTO englishmate_web.turns (id, conversation_id, message, reply, spoken, seconds)
-          VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, message, reply, seconds, created_at`,
-        [turnId, conversationId, message, result.fullText, result.spokenEnglish, seconds]);
+        const { rows } = await client.query(`INSERT INTO englishmate_web.turns (id, conversation_id, message, reply, spoken, seconds, voice, voice_type)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, message, reply, seconds, created_at, voice IS NOT NULL AS has_voice`,
+        [turnId, conversationId, message, result.fullText, result.spokenEnglish, seconds, voice?.buffer ?? null, voice?.type ?? null]);
         return rows[0];
       });
       return { turn, audio: mode === 'voice' ? await textToSpeech(result.spokenEnglish, account.preferences?.level) : null };
@@ -198,9 +208,9 @@ function createAccountApi(store, tutor, options) {
       if (req.method === 'GET') {
         if (route === 'me') return reply(res, 200, { account: publicAccount(account) });
         if (route === 'conversations') {
-          const { rows } = await store.query(`SELECT id, title, mode, updated_at FROM englishmate_web.conversations
+          const { rows } = await store.query(`SELECT id, title, mode, level, updated_at FROM englishmate_web.conversations
             WHERE account_id = $1 ORDER BY updated_at DESC`, [id]);
-          return reply(res, 200, { conversations: rows });
+          return reply(res, 200, { conversations: rows, openers: tutor.LEVEL_OPENERS });
         }
         if (route === 'turns') {
           const conversation = url.searchParams.get('conversation');
@@ -209,6 +219,16 @@ function createAccountApi(store, tutor, options) {
           if (!owner.rowCount) throw missing();
           const turns = await listTurns(id, conversation, 51, url.searchParams.get('before'));
           return reply(res, 200, { turns: turns.slice(-50), more: turns.length > 50 });
+        }
+        if (route === 'voice') {
+          const turnId = url.searchParams.get('turn');
+          if (!validId(turnId)) throw bad('Vocal invalide.');
+          throttle(`voice:${id}`, 30, 60000);
+          const { rows } = await store.query(`SELECT t.voice, t.voice_type FROM englishmate_web.turns t
+            JOIN englishmate_web.conversations c ON c.id = t.conversation_id
+            WHERE t.id = $1 AND c.account_id = $2 AND t.voice IS NOT NULL`, [turnId, id]);
+          if (!rows[0]) throw new WebError(404, 'Ce vocal n’est plus disponible.');
+          return reply(res, 200, { audio: rows[0].voice.toString('base64'), type: rows[0].voice_type });
         }
         if (route === 'vocabulary') {
           const { rows } = await store.query('SELECT id, term, note FROM englishmate_web.vocabulary WHERE account_id = $1 ORDER BY created_at DESC', [id]);

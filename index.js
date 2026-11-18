@@ -8,6 +8,7 @@ const { createAccountStore } = require('./web-account-store.cjs');
 const {
   getUserSession,
   setUserLevel,
+  startLevelConversation,
   restoreUserLevel,
   resetUserHistory,
   transcribeAudio,
@@ -211,6 +212,14 @@ const FOOTER_SIGNATURE = "\n\n_byBEn10_";
 
 const loadSavedLevel = id => probeAdminDatabase?.getLevel?.(id);
 const speechOptions = level => ({ slow: level !== 'advanced' });
+const escapeHtml = text => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// Les parties fautives (⟦…⟧) apparaissent en gras souligné dans Telegram
+async function sendTutorText(ctx, text) {
+  const html = escapeHtml(`${text}\n\nbyBEn10`).replace(/⟦([^⟧]+)⟧/g, '<b><u>$1</u></b>');
+  try { await ctx.reply(html, { parse_mode: 'HTML' }); }
+  catch { await ctx.reply(`${text}\n\nbyBEn10`.replace(/⟦([^⟧]+)⟧/g, '« $1 »')); }
+}
+const spokenOpener = text => text.split('💬').slice(1).join(' ').split('\n').filter(line => !/^\s*(?:🇫🇷|👉)/u.test(line)).join(' ').replace(/Nova\s*:|[❓]/gu, ' ').trim();
 
 // Commande /start
 bot.start(async (ctx) => {
@@ -252,19 +261,18 @@ bot.command(['level', 'niveau'], async (ctx) => {
 // Actions de changement de niveau
 bot.action(/^lvl_(beginner|intermediate|advanced)$/, async (ctx) => {
   const level = ctx.match[1];
-  setUserLevel(ctx.from.id, level);
   await ctx.answerCbQuery();
-  
   const labels = {
     beginner: '🟢 Débutant (Beginner)',
     intermediate: '🟡 Intermédiaire (Intermediate)',
     advanced: '🔴 Avancé (Advanced)'
   };
-
-  await ctx.editMessageText(
-    `✅ Niveau configuré sur : *${labels[level]}* !\n\nEnvoie-moi un message écrit ou une note vocale pour commencer à pratiquer.`,
-    { parse_mode: 'Markdown' }
-  );
+  // Changer de niveau ouvre une nouvelle conversation, annoncée par Nova dans le nouveau niveau
+  const opener = startLevelConversation(ctx.from.id, level);
+  await ctx.editMessageText(`✅ Niveau changé : ${labels[level]}`).catch(() => {});
+  await sendTutorText(ctx, opener);
+  const voiceBuffer = await generateSpeech(spokenOpener(opener), speechOptions(level));
+  if (voiceBuffer) await ctx.replyWithVoice({ source: voiceBuffer, filename: 'nova.mp3' }).catch(() => {});
 });
 
 // Commande /reset
@@ -343,7 +351,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
     }
 
     // 4. Envoyer les corrections et la réponse textuelle signée
-    await ctx.reply(tutorResponse.fullText + "\n\nbyBEn10");
+    await sendTutorText(ctx, tutorResponse.fullText);
 
   } catch (error) {
     console.error('Erreur traitement vocal:', error);
@@ -365,7 +373,7 @@ bot.on('text', async (ctx) => {
     const tutorResponse = await getTutorResponse(ctx.from.id, userText);
 
     // Envoyer d'abord la réponse texte signée
-    await ctx.reply(tutorResponse.fullText + "\n\nbyBEn10");
+    await sendTutorText(ctx, tutorResponse.fullText);
     console.log(`💬 Réponse texte envoyée à ${senderName}`);
 
     // Générer également le message vocal pour l'écoute
