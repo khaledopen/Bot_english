@@ -82,8 +82,13 @@ async function verifySupabasePassword(account, password) {
   return session?.user?.id === account.id;
 }
 
+function isAdmin(account) {
+  const admins = (process.env.ADMIN_EMAILS || '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
+  return Boolean(account?.username && admins.includes(account.username.toLowerCase()));
+}
+
 function publicAccount(account) {
-  return { username: account.username, preferences: account.preferences };
+  return { username: account.username, preferences: account.preferences, ...(isAdmin(account) ? { admin: true } : {}) };
 }
 
 function createAuth(store, { secure = true } = {}) {
@@ -218,4 +223,4 @@ function createAuth(store, { secure = true } = {}) {
   };
 }
 
-module.exports = { createAuth, publicAccount, WebError, normalizeUsername };
+module.exports = { createAuth, publicAccount, isAdmin, WebError, normalizeUsername };

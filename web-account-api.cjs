@@ -1,5 +1,5 @@
 const { randomUUID } = require('node:crypto');
-const { createAuth, normalizeUsername, publicAccount, WebError } = require('./web-account-auth.cjs');
+const { createAuth, isAdmin, normalizeUsername, publicAccount, WebError } = require('./web-account-auth.cjs');
 const { describeFailure } = require('./admin-postgres.cjs');
 
 const LIMIT_AUDIO = 3 * 1024 * 1024;
@@ -105,6 +105,16 @@ function createAccountApi(store, tutor, options) {
     return rows;
   }
 
+  async function recentTurns(accountId, limit = 9) {
+    const { rows } = await store.query(`
+      SELECT message, reply FROM (
+        SELECT t.message, t.reply, t.created_at, t.id FROM englishmate_web.turns t
+        JOIN englishmate_web.conversations c ON c.id = t.conversation_id
+        WHERE c.account_id = $1 ORDER BY t.created_at DESC, t.id DESC LIMIT $2
+      ) recent ORDER BY created_at, id`, [accountId, limit]);
+    return rows;
+  }
+
   async function sendTurn(account, body) {
     if (!account.preferences) throw new WebError(409, 'Configure tes préférences pour commencer.');
     const { conversationId, turnId, mode } = body;
@@ -126,22 +136,22 @@ function createAccountApi(store, tutor, options) {
       if (existing.rows[0] && existing.rows[0].mode !== mode) throw bad('Format incompatible avec cette conversation.');
       let message;
       let seconds = 0;
+      const past = await recentTurns(account.id, 9);
       if (mode === 'voice') {
         const audio = decodeAudio(body);
         let transcript;
-        try { transcript = await tutor.transcribeAudio(audio.buffer, audio.extension, audio.type); }
+        try { transcript = await tutor.transcribeAudio(audio.buffer, audio.extension, audio.type, past.at(-1)?.reply || ''); }
         catch { throw new WebError(502, 'La transcription a échoué. Réessaie avec ton enregistrement.'); }
         message = transcript?.trim().slice(0, 1500);
-        if (!message) throw new WebError(422, 'Aucune parole détectée. Essaie un autre enregistrement.');
+        if (!message) throw new WebError(422, 'Je n’ai pas bien entendu ton vocal. Parle un peu plus fort, près du micro, puis réessaie.');
         seconds = Math.max(1, Math.min(45, Math.round(Number(body.seconds) || 1)));
       } else {
         message = typeof body.text === 'string' ? body.text.trim() : '';
         if (!message || message.length > 1500) throw bad('Écris un message de 1 à 1 500 caractères.');
       }
-      const past = await listTurns(account.id, conversationId, 9);
       const history = past.flatMap(turn => [{ role: 'user', content: turn.message }, { role: 'assistant', content: turn.reply }]);
       let result;
-      try { result = await tutor.replyToSession({ ...account.preferences, history }, message, 'web'); }
+      try { result = await tutor.replyToSession({ ...account.preferences, history, inputMode: mode }, message, 'web'); }
       catch { throw new WebError(502, 'Le coach ne répond pas pour le moment. Réessaie.'); }
       const turn = await store.transaction(async client => {
         await client.query(`INSERT INTO englishmate_web.conversations (id, account_id, title, mode)
@@ -203,6 +213,37 @@ function createAccountApi(store, tutor, options) {
         if (route === 'vocabulary') {
           const { rows } = await store.query('SELECT id, term, note FROM englishmate_web.vocabulary WHERE account_id = $1 ORDER BY created_at DESC', [id]);
           return reply(res, 200, { words: rows });
+        }
+        if (route === 'admin') {
+          if (!isAdmin(account)) throw missing();
+          const totals = await store.query(`SELECT
+            (SELECT count(*)::int FROM englishmate_web.accounts) AS users,
+            (SELECT count(*)::int FROM englishmate_web.accounts WHERE preferences IS NOT NULL) AS onboarded,
+            (SELECT count(*)::int FROM englishmate_web.accounts WHERE created_at >= now() - interval '1 day') AS new_today,
+            (SELECT count(*)::int FROM englishmate_web.accounts WHERE created_at >= now() - interval '7 days') AS new_week,
+            (SELECT count(*)::int FROM englishmate_web.accounts WHERE created_at >= now() - interval '30 days') AS new_month,
+            (SELECT count(DISTINCT c.account_id)::int FROM englishmate_web.turns t JOIN englishmate_web.conversations c ON c.id = t.conversation_id
+              WHERE t.created_at >= now() - interval '1 day') AS active_today,
+            (SELECT count(DISTINCT c.account_id)::int FROM englishmate_web.turns t JOIN englishmate_web.conversations c ON c.id = t.conversation_id
+              WHERE t.created_at >= now() - interval '7 days') AS active_week,
+            (SELECT count(*)::int FROM englishmate_web.turns) AS messages,
+            (SELECT count(*)::int FROM englishmate_web.turns WHERE seconds > 0) AS voice_messages,
+            (SELECT coalesce(sum(seconds), 0)::int FROM englishmate_web.turns) AS voice_seconds,
+            (SELECT count(*)::int FROM englishmate_web.vocabulary) AS words`);
+          const signups = await store.query(`SELECT to_char(day, 'YYYY-MM-DD') AS day, count(a.id)::int AS users
+            FROM generate_series(date_trunc('day', now() AT TIME ZONE 'UTC') - interval '13 days', date_trunc('day', now() AT TIME ZONE 'UTC'), interval '1 day') day
+            LEFT JOIN englishmate_web.accounts a ON date_trunc('day', a.created_at AT TIME ZONE 'UTC') = day
+            GROUP BY day ORDER BY day`);
+          const latest = await store.query(`SELECT a.username AS email, a.created_at, a.preferences->>'level' AS level,
+            count(t.id)::int AS messages, max(t.created_at) AS last_active
+            FROM englishmate_web.accounts a
+            LEFT JOIN englishmate_web.conversations c ON c.account_id = a.id
+            LEFT JOIN englishmate_web.turns t ON t.conversation_id = c.id
+            GROUP BY a.id ORDER BY a.created_at DESC LIMIT 50`);
+          let telegram = null;
+          try { telegram = (await store.query('SELECT count(*)::int AS total FROM englishmate_private.admin_activity')).rows[0].total; }
+          catch {}
+          return reply(res, 200, { ...totals.rows[0], telegram, signups: signups.rows, latest: latest.rows });
         }
         if (route === 'dashboard') {
           const stats = await store.query(`SELECT

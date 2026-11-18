@@ -11,6 +11,7 @@ const {
   resetUserHistory,
   transcribeAudio,
   getTutorResponse,
+  lastTutorReply,
   generateSpeech
 } = tutor;
 
@@ -312,7 +313,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
 
     // 1. Transcription avec Groq Whisper (gratuit & ultra rapide)
     await ctx.sendChatAction('typing');
-    const userTranscript = await transcribeAudio(audioBuffer);
+    const userTranscript = await transcribeAudio(audioBuffer, 'ogg', 'audio/ogg', lastTutorReply(ctx.from.id));
 
     if (!userTranscript || !userTranscript.trim()) {
       await ctx.reply("🤔 Je n'ai pas bien entendu ton enregistrement. Peux-tu réessayer en parlant plus près du micro ?" + FOOTER_SIGNATURE, { parse_mode: 'Markdown' });
@@ -324,7 +325,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
 
     // 2. Générer la réponse pédagogique (Groq LLaMA 3.3 70B)
     await ctx.sendChatAction('typing');
-    const tutorResponse = await getTutorResponse(ctx.from.id, userTranscript);
+    const tutorResponse = await getTutorResponse(ctx.from.id, userTranscript, { inputMode: 'voice' });
 
     // 3. Synthèse vocale de la réponse anglaise
     await ctx.sendChatAction('record_voice');
