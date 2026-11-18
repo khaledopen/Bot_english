@@ -39,7 +39,22 @@ function createPostgresActivity(connectionString) {
       CREATE TABLE IF NOT EXISTS englishmate_private.admin_activity (
         telegram_id bigint PRIMARY KEY,
         announced boolean NOT NULL DEFAULT false
-      )
+      );
+      CREATE TABLE IF NOT EXISTS englishmate_private.telegram_users (
+        telegram_id bigint PRIMARY KEY,
+        first_name text,
+        last_name text,
+        username text,
+        language_code text,
+        level text,
+        first_seen timestamptz DEFAULT now(),
+        last_seen timestamptz,
+        messages integer NOT NULL DEFAULT 0,
+        voice_messages integer NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS telegram_users_last_seen ON englishmate_private.telegram_users(last_seen DESC);
+      INSERT INTO englishmate_private.telegram_users (telegram_id, first_seen)
+        SELECT telegram_id, NULL FROM englishmate_private.admin_activity ON CONFLICT (telegram_id) DO NOTHING;
       `).catch((error) => {
         schema = undefined;
         throw error;
@@ -75,6 +90,25 @@ function createPostgresActivity(connectionString) {
     async count() {
       const { rows } = await query('SELECT count(*) AS total FROM englishmate_private.admin_activity');
       return rows[0].total;
+    },
+    async track(user, { messages = 0, voice = 0, level = null } = {}) {
+      const clean = (value, max) => typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null;
+      await query(
+        `INSERT INTO englishmate_private.telegram_users AS u
+           (telegram_id, first_name, last_name, username, language_code, level, last_seen, messages, voice_messages)
+         VALUES ($1, $2, $3, $4, $5, $6, now(), $7, $8)
+         ON CONFLICT (telegram_id) DO UPDATE SET
+           first_name = coalesce(excluded.first_name, u.first_name),
+           last_name = excluded.last_name,
+           username = excluded.username,
+           language_code = coalesce(excluded.language_code, u.language_code),
+           level = coalesce(excluded.level, u.level),
+           last_seen = now(),
+           messages = u.messages + excluded.messages,
+           voice_messages = u.voice_messages + excluded.voice_messages`,
+        [user.id, clean(user.first_name, 80), clean(user.last_name, 80), clean(user.username, 40),
+          clean(user.language_code, 12), level, messages, voice],
+      );
     },
   };
 }

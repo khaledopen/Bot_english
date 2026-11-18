@@ -241,8 +241,30 @@ function createAccountApi(store, tutor, options) {
             LEFT JOIN englishmate_web.turns t ON t.conversation_id = c.id
             GROUP BY a.id ORDER BY a.created_at DESC LIMIT 50`);
           let telegram = null;
-          try { telegram = (await store.query('SELECT count(*)::int AS total FROM englishmate_private.admin_activity')).rows[0].total; }
-          catch {}
+          try {
+            const tg = await store.query(`SELECT
+              count(*)::int AS users,
+              count(*) FILTER (WHERE first_seen >= now() - interval '1 day')::int AS new_today,
+              count(*) FILTER (WHERE first_seen >= now() - interval '7 days')::int AS new_week,
+              count(*) FILTER (WHERE last_seen >= now() - interval '1 day')::int AS active_today,
+              count(*) FILTER (WHERE last_seen >= now() - interval '7 days')::int AS active_week,
+              coalesce(sum(messages), 0)::int AS messages,
+              coalesce(sum(voice_messages), 0)::int AS voice_messages
+              FROM englishmate_private.telegram_users`);
+            const tgDays = await store.query(`SELECT to_char(day, 'YYYY-MM-DD') AS day, count(u.telegram_id)::int AS users
+              FROM generate_series(date_trunc('day', now() AT TIME ZONE 'UTC') - interval '13 days', date_trunc('day', now() AT TIME ZONE 'UTC'), interval '1 day') day
+              LEFT JOIN englishmate_private.telegram_users u ON date_trunc('day', u.first_seen AT TIME ZONE 'UTC') = day
+              GROUP BY day ORDER BY day`);
+            const tgLatest = await store.query(`SELECT telegram_id::text AS id, first_name, last_name, username, language_code, level,
+              first_seen, last_seen, messages, voice_messages
+              FROM englishmate_private.telegram_users ORDER BY coalesce(last_seen, first_seen) DESC LIMIT 100`);
+            telegram = { ...tg.rows[0], signups: tgDays.rows, latest: tgLatest.rows };
+          } catch {
+            try {
+              const total = (await store.query('SELECT count(*)::int AS total FROM englishmate_private.admin_activity')).rows[0].total;
+              telegram = { users: total, new_today: null, new_week: null, active_today: null, active_week: null, messages: null, voice_messages: null, signups: [], latest: [] };
+            } catch {}
+          }
           return reply(res, 200, { ...totals.rows[0], telegram, signups: signups.rows, latest: latest.rows });
         }
         if (route === 'dashboard') {

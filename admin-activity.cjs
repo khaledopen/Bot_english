@@ -42,17 +42,15 @@ function createFileActivity(env) {
 function installAdminActivity(bot, env = process.env) {
   const owner = (env.ADMIN_USER_ID || '').trim();
   const channel = (env.ADMIN_CHANNEL_ID || '').trim();
-  if (!owner && !channel) return;
-  if (!/^\d+$/.test(owner) || !/^-100\d+$/.test(channel)) {
-    console.warn('Suivi admin désactivé : vérifie ADMIN_USER_ID et ADMIN_CHANNEL_ID.');
-    return;
-  }
+  const notify = /^\d+$/.test(owner) && /^-100\d+$/.test(channel);
+  if ((owner || channel) && !notify) console.warn('Notifications admin désactivées : vérifie ADMIN_USER_ID et ADMIN_CHANNEL_ID.');
 
   const databaseUrl = env.ADMIN_DATABASE_URL?.trim();
   if (!databaseUrl && env.RENDER === 'true') {
     console.warn('Suivi admin désactivé : configure ADMIN_DATABASE_URL sur Render.');
     return;
   }
+  if (!databaseUrl && !notify) return;
   const store = databaseUrl
     ? require('./admin-postgres.cjs').createPostgresActivity(databaseUrl)
     : createFileActivity(env);
@@ -85,7 +83,7 @@ function installAdminActivity(bot, env = process.env) {
   }
 
   bot.command('admin_stats', async (ctx) => {
-    if (ctx.chat?.type !== 'private' || String(ctx.from?.id) !== owner) return;
+    if (!notify || ctx.chat?.type !== 'private' || String(ctx.from?.id) !== owner) return;
     let total;
     try {
       total = await store.count();
@@ -100,7 +98,15 @@ function installAdminActivity(bot, env = process.env) {
         (!ctx.message && !ctx.callbackQuery)) return next();
 
     const id = String(ctx.from.id);
-    if (!sending.has(id)) {
+    const message = ctx.message;
+    const isVoice = Boolean(message?.voice || message?.audio);
+    const isText = typeof message?.text === 'string' && !message.text.startsWith('/');
+    const level = ctx.callbackQuery?.data?.match(/^lvl_(beginner|intermediate|advanced)$/)?.[1] || null;
+    if (store.track) {
+      store.track(ctx.from, { messages: isText || isVoice ? 1 : 0, voice: isVoice ? 1 : 0, level })
+        .catch(() => console.warn('Suivi Telegram non enregistré.'));
+    }
+    if (notify && !sending.has(id)) {
       sending.add(id);
       void announce(ctx, id);
     }
