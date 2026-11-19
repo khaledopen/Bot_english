@@ -101,7 +101,7 @@ function installAdminActivity(bot, env = process.env) {
     const message = ctx.message;
     const isVoice = Boolean(message?.voice || message?.audio);
     const isText = typeof message?.text === 'string' && !message.text.startsWith('/');
-    const level = ctx.callbackQuery?.data?.match(/^lvl_(beginner|intermediate|advanced)$/)?.[1] || null;
+    const level = ctx.callbackQuery?.data?.match(/^lvl(?:in)?_(beginner|intermediate|advanced)$/)?.[1] || null;
     if (store.track) {
       store.track(ctx.from, { messages: isText || isVoice ? 1 : 0, voice: isVoice ? 1 : 0, level })
         .catch(() => console.warn('Suivi Telegram non enregistré.'));

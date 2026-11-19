@@ -214,10 +214,28 @@ const loadSavedLevel = id => probeAdminDatabase?.getLevel?.(id);
 const speechOptions = level => ({ slow: level !== 'advanced', level: level || 'intermediate' });
 const escapeHtml = text => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 // Les parties fautives (⟦…⟧) apparaissent en gras souligné dans Telegram
-async function sendTutorText(ctx, text) {
+// Bouton « Niveau » sous les messages de Nova, et choix du niveau affiché à sa place
+const LEVEL_LABELS = { beginner: '🟢 Débutant (Beginner)', intermediate: '🟡 Intermédiaire (Intermediate)', advanced: '🔴 Avancé (Advanced)' };
+const LEVEL_SHORT = { beginner: '🟢 Débutant', intermediate: '🟡 Intermédiaire', advanced: '🔴 Avancé' };
+const levelButton = level => Markup.inlineKeyboard([[Markup.button.callback(`🎚️ Niveau : ${LEVEL_SHORT[level] || LEVEL_SHORT.intermediate} · Changer`, 'level_menu')]]);
+const levelChoices = (current, prefix = 'lvl_') => Markup.inlineKeyboard([
+  ...Object.keys(LEVEL_LABELS).map(level => [Markup.button.callback(`${LEVEL_LABELS[level]}${level === current ? ' ✓' : ''}`, `${prefix}${level}`)]),
+  ...(prefix === 'lvlin_' ? [[Markup.button.callback('↩️ Annuler', 'level_cancel')]] : []),
+]);
+
+async function sendTutorText(ctx, text, { button = true } = {}) {
+  const level = getUserSession(ctx.from.id).level;
+  const extra = button ? levelButton(level) : {};
   const html = escapeHtml(`${text}\n\nbyBEn10`).replace(/⟦([^⟧]+)⟧/g, '<b><u>$1</u></b>');
-  try { await ctx.reply(html, { parse_mode: 'HTML' }); }
-  catch { await ctx.reply(`${text}\n\nbyBEn10`.replace(/⟦([^⟧]+)⟧/g, '« $1 »')); }
+  try { return await ctx.reply(html, { parse_mode: 'HTML', ...extra }); }
+  catch { return ctx.reply(`${text}\n\nbyBEn10`.replace(/⟦([^⟧]+)⟧/g, '« $1 »'), extra); }
+}
+
+// Note vocale de Nova, avec le bouton « Niveau » quand elle termine l'échange
+async function sendNovaVoice(ctx, buffer, filename, { caption, button = false } = {}) {
+  if (!buffer) return null;
+  const extra = { ...(caption ? { caption } : {}), ...(button ? levelButton(getUserSession(ctx.from.id).level) : {}) };
+  return ctx.replyWithVoice({ source: buffer, filename }, extra).catch(error => { console.warn('Note vocale non envoyée :', error.message); return null; });
 }
 const spokenOpener = text => text.split('💬').slice(1).join(' ').split('\n').filter(line => !/^\s*(?:🇫🇷|👉)/u.test(line)).join(' ').replace(/Nova\s*:|[❓]/gu, ' ').trim();
 
@@ -239,40 +257,47 @@ Niveau actuel : *${session.level.toUpperCase()}*
 
 Choisis ton niveau ou commence dès maintenant en m'envoyant un message (texte ou vocal) !${FOOTER_SIGNATURE}`;
 
-  const keyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('🟢 Débutant (Beginner)', 'lvl_beginner')],
-    [Markup.button.callback('🟡 Intermédiaire (Intermediate)', 'lvl_intermediate')],
-    [Markup.button.callback('🔴 Avancé (Advanced)', 'lvl_advanced')]
-  ]);
-
-  await ctx.replyWithMarkdown(welcomeText, keyboard);
+  await ctx.replyWithMarkdown(welcomeText, levelChoices(session.level));
 });
 
 // Commande /level
 bot.command(['level', 'niveau'], async (ctx) => {
-  const keyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('🟢 Débutant (Beginner)', 'lvl_beginner')],
-    [Markup.button.callback('🟡 Intermédiaire (Intermediate)', 'lvl_intermediate')],
-    [Markup.button.callback('🔴 Avancé (Advanced)', 'lvl_advanced')]
-  ]);
-  await ctx.reply('🎯 Sélectionne ton niveau actuel d\'anglais :', keyboard);
+  await restoreUserLevel(ctx.from.id, loadSavedLevel);
+  await ctx.reply('🎯 Sélectionne ton niveau actuel d\'anglais :', levelChoices(getUserSession(ctx.from.id).level));
 });
 
-// Actions de changement de niveau
-bot.action(/^lvl_(beginner|intermediate|advanced)$/, async (ctx) => {
-  const level = ctx.match[1];
+// Bouton « Niveau » d'un message de Nova : les trois niveaux s'affichent sous ce message
+bot.action('level_menu', async (ctx) => {
   await ctx.answerCbQuery();
-  const labels = {
-    beginner: '🟢 Débutant (Beginner)',
-    intermediate: '🟡 Intermédiaire (Intermediate)',
-    advanced: '🔴 Avancé (Advanced)'
-  };
+  await restoreUserLevel(ctx.from.id, loadSavedLevel);
+  await ctx.editMessageReplyMarkup(levelChoices(getUserSession(ctx.from.id).level, 'lvlin_').reply_markup).catch(() => {});
+});
+bot.action('level_cancel', async (ctx) => {
+  await ctx.answerCbQuery();
+  await ctx.editMessageReplyMarkup(levelButton(getUserSession(ctx.from.id).level).reply_markup).catch(() => {});
+});
+
+// Actions de changement de niveau (lvl_ : menu /start ou /level ; lvlin_ : sous un message de Nova)
+bot.action(/^(lvl|lvlin)_(beginner|intermediate|advanced)$/, async (ctx) => {
+  const inPlace = ctx.match[1] === 'lvlin';
+  const level = ctx.match[2];
+  await restoreUserLevel(ctx.from.id, loadSavedLevel);
+  const session = getUserSession(ctx.from.id);
+  // Même niveau en pleine conversation : on garde la conversation en cours
+  if (level === session.level && session.history.length > 1) {
+    await ctx.answerCbQuery(`Tu es déjà en ${LEVEL_SHORT[level]}.`);
+    if (inPlace) await ctx.editMessageReplyMarkup(levelButton(level).reply_markup).catch(() => {});
+    else await ctx.editMessageText(`✅ Niveau conservé : ${LEVEL_LABELS[level]}`).catch(() => {});
+    return;
+  }
+  await ctx.answerCbQuery(`Niveau : ${LEVEL_SHORT[level]}`);
   // Changer de niveau ouvre une nouvelle conversation, annoncée par Nova dans le nouveau niveau
   const opener = startLevelConversation(ctx.from.id, level);
-  await ctx.editMessageText(`✅ Niveau changé : ${labels[level]}`).catch(() => {});
-  await sendTutorText(ctx, opener);
+  if (inPlace) await ctx.editMessageReplyMarkup(undefined).catch(() => {}); // le message de Nova reste intact
+  else await ctx.editMessageText(`✅ Niveau changé : ${LEVEL_LABELS[level]}`).catch(() => {});
+  await sendTutorText(ctx, opener, { button: false });
   const voiceBuffer = await generateSpeech(spokenOpener(opener), speechOptions(level));
-  if (voiceBuffer) await ctx.replyWithVoice({ source: voiceBuffer, filename: 'nova.mp3' }).catch(() => {});
+  if (!await sendNovaVoice(ctx, voiceBuffer, 'nova.mp3', { button: true })) await ctx.reply('🎚️ Tu peux changer de niveau à tout moment :', levelButton(level));
 });
 
 // Commande /reset
@@ -345,12 +370,9 @@ bot.on(['voice', 'audio'], async (ctx) => {
     await ctx.sendChatAction('record_voice');
     const voiceBuffer = await generateSpeech(tutorResponse.spokenEnglish, speechOptions(tutorResponse.level));
 
-    if (voiceBuffer) {
-      // Envoyer la note vocale Telegram
-      await ctx.replyWithVoice({ source: voiceBuffer, filename: 'response.mp3' });
-    }
+    await sendNovaVoice(ctx, voiceBuffer, 'response.mp3');
 
-    // 4. Envoyer les corrections et la réponse textuelle signée
+    // 4. Envoyer les corrections et la réponse textuelle signée, avec le bouton « Niveau »
     await sendTutorText(ctx, tutorResponse.fullText);
 
   } catch (error) {
@@ -373,15 +395,16 @@ bot.on('text', async (ctx) => {
     const tutorResponse = await getTutorResponse(ctx.from.id, userText);
 
     // Envoyer d'abord la réponse texte signée
-    await sendTutorText(ctx, tutorResponse.fullText);
+    const textMessage = await sendTutorText(ctx, tutorResponse.fullText, { button: false });
     console.log(`💬 Réponse texte envoyée à ${senderName}`);
 
-    // Générer également le message vocal pour l'écoute
+    // Générer également le message vocal pour l'écoute ; le bouton « Niveau » se place en bas de l'échange
     await ctx.sendChatAction('record_voice');
     const voiceBuffer = await generateSpeech(tutorResponse.spokenEnglish, speechOptions(tutorResponse.level));
-    if (voiceBuffer) {
-      await ctx.replyWithVoice({ source: voiceBuffer, filename: 'english.mp3' }, { caption: '🎧 Écoute la prononciation anglaise :' });
+    if (await sendNovaVoice(ctx, voiceBuffer, 'english.mp3', { caption: '🎧 Écoute la prononciation anglaise :', button: true })) {
       console.log(`🎙️ Note vocale envoyée à ${senderName}`);
+    } else if (textMessage) {
+      await ctx.telegram.editMessageReplyMarkup(ctx.chat.id, textMessage.message_id, undefined, levelButton(tutorResponse.level).reply_markup).catch(() => {});
     }
 
   } catch (error) {
